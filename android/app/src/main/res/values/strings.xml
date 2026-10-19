@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Pessebre</string>
+    <string name="title_activity_main">Pessebre</string>
+    <string name="package_name">es.xeye.stocka.belen</string>
+    <string name="custom_url_scheme">es.xeye.stocka.belen</string>
+</resources>
