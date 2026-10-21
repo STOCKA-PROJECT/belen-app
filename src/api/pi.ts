@@ -1,5 +1,5 @@
 import type { BundleSource } from '../storage/bundleFiles'
-import type { ImportReport, OverrideMode, PiBundles, PiInfo, PiNet, PiStatus, PiUpload } from '../types'
+import type { ImportReport, OverrideMode, PiAlert, PiBundles, PiInfo, PiMotor, PiNet, PiStatus, PiUpload } from '../types'
 import { joinUrl } from '../util/url'
 import { isRecord, NetworkError, readJsonBody, safeFetch } from './errors'
 
@@ -157,6 +157,12 @@ export class PiClient {
     return this.json('/api/net')
   }
 
+  /** `GET /api/alerts`: the latest alerts of the player, oldest first (empty when none). */
+  async getAlerts(): Promise<PiAlert[]> {
+    const data = await this.json<{ alerts?: unknown }>('/api/alerts')
+    return Array.isArray(data?.alerts) ? (data.alerts.filter(isRecord) as PiAlert[]) : []
+  }
+
   // ---------------------------------------------------------------- control (PIN)
 
   play(cycles?: number): Promise<PiStatus> {
@@ -189,6 +195,19 @@ export class PiClient {
 
   clearOverrides(): Promise<{ cleared: number; off: string[] }> {
     return this.json('/api/overrides', { method: 'DELETE', pin: true })
+  }
+
+  /** `DELETE /api/alerts`: forgets every alert; `cleared` is how many there were. */
+  clearAlerts(): Promise<{ cleared: number; alerts: PiAlert[] }> {
+    return this.json('/api/alerts', { method: 'DELETE', pin: true })
+  }
+
+  /**
+   * `POST /api/motors/{name}/unlock`: releases a motor locked after a timeout. `unlocked` is false
+   * when it was not locked; an unknown motor fails with `unknown_target`.
+   */
+  unlockMotor(name: string): Promise<{ motor: string; unlocked: boolean; motors: Record<string, PiMotor> }> {
+    return this.json(`/api/motors/${encodeURIComponent(name)}/unlock`, { method: 'POST', pin: true })
   }
 
   setNetMode(mode: 'ap' | 'auto'): Promise<PiNet> {

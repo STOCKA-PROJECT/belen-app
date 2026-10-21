@@ -161,3 +161,15 @@ button, input, select { font: inherit; color: inherit; }
 .details > summary { cursor: pointer; list-style: none; }
 .details > summary::-webkit-details-marker { display: none; }
 .logs { max-height: 240px; overflow: auto; background: var(--c-bg-alt); border-radius: 8px; padding: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 15px; white-space: pre-wrap; word-break: break-all; }
+
+/* ---------------------------------------------------------------- alerts, sensors, motors */
+.panel-alert { border-color: var(--c-danger); box-shadow: inset 4px 0 0 var(--c-danger); }
+.panel-alert .panel-title { color: var(--c-danger); }
+.alert-heading { display: inline-flex; align-items: center; gap: 6px; }
+.alert-icon { font-size: 14px; line-height: 14px; }
+.alert-list > li { align-items: flex-start; }
+.alert-message { font-size: 13px; line-height: 18px; color: var(--c-ink); }
+.sensor-list > li { justify-content: flex-start; }
+.sensor-dot { width: 10px; height: 10px; flex: none; border-radius: 50%; background: var(--c-line-strong); transition: background-color .12s, box-shadow .12s; }
+.sensor-dot.is-on { background: var(--c-ok); box-shadow: 0 0 0 3px var(--c-ok-soft); }
+.motor-state { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }

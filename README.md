@@ -63,11 +63,11 @@ src/
 │   ├── kv.ts / kv.capacitor.ts                 clave-valor (Preferences) + fake en memoria
 │   └── bundleFiles.ts / bundleFiles.capacitor.ts  ficheros de paquetes (Filesystem) + fake en memoria
 ├── views/                 LoginView · OrganizationsView · TimelinesView · LibraryView · PiView
-├── components/            StatusCard · PortSwitches · BundleList · UploadProgress · PinDialog
+├── components/            AlertsCard · StatusCard · PortSwitches · SensorList · BundleList · UploadProgress · PinDialog
 ├── i18n.ts                diccionarios ca/es, `t()`, idioma del dispositivo, selector
 ├── styles/tokens.css      variables del brandbook (claro/oscuro); app.css: .btn .panel .badge-* .field…
 ├── router.ts · App.vue · main.ts · config.ts · types.ts · errorMessages.ts
-└── util/                  base64, formato, nombre del paquete, URLs
+└── util/                  base64, formato, nombre del paquete, URLs, textos de alertas/sensores/motores (piLabels)
 ```
 
 Pestañas: **Stocka** (login → organizaciones → timelines → «Descarrega»), **Biblioteca** (paquetes
@@ -118,13 +118,15 @@ Fuente de verdad: `rpi4-system/app/api/server.py`. Lecturas libres; escrituras c
 | Método | Ruta | Uso en la app |
 |---|---|---|
 | GET | `/api/info` | comprobar que la dirección responde; nombre del dispositivo, versión |
-| GET | `/api/status` · `/api/events` (SSE) | estado en vivo: `state, showName, mode, cycle, cycleMs, durationMs, hardware[{name,kind,off}], lastError…` |
+| GET | `/api/status` · `/api/events` (SSE) | estado en vivo: `state, showName, mode, cycle, cycleMs, durationMs, hardware[{name,kind,off}], lastError…` y, desde el contrato v3, `sensors{name: {active, raw, onActive, blocked, address}}`, `motors{name: {direction, runningS, lastEnd, locked, blocked, limitForward, limitReverse}}` y `alerts[{code, port, message, at, …}]` (opcionales: una Raspberry anterior no los manda) |
+| GET · DELETE | `/api/alerts` | alertas (`motor_timeout`, `sensor_stop_show`, `sensor_panic`; el `message` ya viene en catalán y se muestra tal cual; código desconocido → «Alerta (código)»); «Esborrar alertes» |
+| POST | `/api/motors/{name}/unlock` | «Desbloquejar» un motor bloqueado tras un `motor_timeout` (desde la alerta o desde su fila de puertos); `unlocked: false` = ya no lo estaba |
 | GET | `/api/bundles` · `/api/net` · `/api/logs?n=` | paquetes almacenados, red, registro |
 | POST | `/api/bundles?activate=1` (multipart `file`) | paquetes ≤ 4 MiB en una sola petición |
 | POST/PUT/POST | `/api/uploads` → `/api/uploads/{id}` (`Content-Range: bytes a-b/total`) → `/api/uploads/{id}/finish?activate=` | subida reanudable en trozos de 1 MiB; `409 bad_offset` devuelve `received` y la app resincroniza; `GET /api/uploads/{id}` reanuda tras reiniciar la app (el `uploadId` se guarda por fichero y Raspberry) |
 | POST | `/api/bundles/{hash}/activate` · `/api/rollback` · DELETE `/api/bundles/{hash}` | gestión de paquetes |
 | POST | `/api/play` `{cycles?}` · `/api/stop` · `/api/panic` | mandos |
-| PUT | `/api/overrides` `{target, mode: "off"|"normal"}` · DELETE `/api/overrides` | **cortar / restablecer un puerto**; los cortados se muestran en rojo |
+| PUT | `/api/overrides` `{target, mode: "off"|"normal"}` · DELETE `/api/overrides` | **cortar / restablecer un puerto** (también motores y sensores); los cortados se muestran en rojo; un sensor `onActive: panic` no se puede cortar y la app deshabilita el botón |
 | POST | `/api/net/mode` `{mode}` · `/api/net/hotspot` · `/api/system/reboot` | acciones rápidas, siempre tras confirmación |
 
 Reintentos de los trozos: errores de transporte y 5xx con backoff 0,5 s → 1 s → 2 s (4 intentos);
@@ -179,6 +181,13 @@ rechaza el paquete (422).
   con cliente falso, deduplicación por hash, sustitución del fichero antiguo, error 422.
 - `src/storage/bundleFiles.capacitor.test.ts`: escritura por trozos base64 y lectura por rangos con
   un Filesystem falso.
+- `src/stores/pi.test.ts`: alertas (más reciente primero, vacías sin estado o con una Raspberry
+  anterior), sensores con nombre, motores bloqueados; borrar alertas y desbloquear con PIN, sin PIN
+  (abre el diálogo y reintenta al entrarlo), PIN erróneo, diálogo cancelado, `unlocked: false`,
+  motor desconocido.
+- `src/util/piLabels.test.ts`: etiquetas por código con alternativa, botón de desbloqueo solo en la
+  alerta más reciente de un motor aún bloqueado, tiempo relativo (reloj de la Raspberry adelantado,
+  fechas inválidas), textos de sensores y motores.
 - `src/i18n.test.ts`: todas las claves de `ca` existen en `es` y viceversa, mismos placeholders.
 - `src/util/bundleName.test.ts`: slug/nombre del paquete y `Content-Disposition`.
 - `src/api/pi.integration.test.ts` (se salta si no hay entorno): contra una `belen-api` real, por

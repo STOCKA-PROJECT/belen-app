@@ -4,9 +4,10 @@ import { computed, reactive, ref, shallowRef } from 'vue'
 import { PI_CODES, PiApiError, PiClient } from '../api/pi'
 import { DEFAULT_PI_URL, IS_NATIVE, PI_POLL_MS, PI_URL_CANDIDATES } from '../config'
 import { piErrorMessage } from '../errorMessages'
+import { t } from '../i18n'
 import { getBundleFiles, getKv, KEYS } from '../storage'
 import { readJson, writeJson } from '../storage/kv'
-import type { ImportReport, LibraryEntry, OverrideMode, PiBundles, PiHardware, PiInfo, PiNet, PiStatus } from '../types'
+import type { ImportReport, LibraryEntry, OverrideMode, PiAlert, PiBundles, PiHardware, PiInfo, PiMotor, PiNet, PiSensor, PiStatus } from '../types'
 import { normalizePiUrl } from '../util/url'
 import { useUiStore } from './ui'
 
@@ -31,6 +32,11 @@ export interface UploadProgressState {
 }
 
 type Action = () => Promise<void>
+
+/** A sensor of the live status with its port name. */
+export interface NamedSensor extends PiSensor {
+  name: string
+}
 
 /** Connection, live status and every command of the Raspberry Pi. */
 export const usePiStore = defineStore('pi', () => {
@@ -72,6 +78,13 @@ export const usePiStore = defineStore('pi', () => {
   const hardware = computed<PiHardware[]>(() => status.value?.hardware ?? [])
   const cutCount = computed(() => hardware.value.filter((h) => h.off).length)
   const playing = computed(() => status.value?.state === 'PLAYING')
+  /** Alerts of the live status, newest first. */
+  const alerts = computed<PiAlert[]>(() => [...(status.value?.alerts ?? [])].reverse())
+  /** Sensors of the live status, in the order the Pi lists them. */
+  const sensors = computed<NamedSensor[]>(() => Object.entries(status.value?.sensors ?? {}).map(([sensorName, s]) => ({ ...s, name: sensorName })))
+  /** Motors of the live status by port name. */
+  const motors = computed<Record<string, PiMotor>>(() => status.value?.motors ?? {})
+  const lockedMotors = computed(() => Object.keys(motors.value).filter((m) => motors.value[m]?.locked))
 
   // ---------------------------------------------------------------- settings
 
@@ -261,6 +274,19 @@ export const usePiStore = defineStore('pi', () => {
       await client.value.clearOverrides()
       await refreshStatus()
     })
+  const clearAlerts = () =>
+    guarded(async () => {
+      await client.value.clearAlerts()
+      if (status.value) status.value = { ...status.value, alerts: [] }
+      await refreshStatus()
+    })
+  /** Releases a motor locked after a timeout; tells the user when it was not locked any more. */
+  const unlockMotor = (motorName: string) =>
+    guarded(async () => {
+      const result = await client.value.unlockMotor(motorName)
+      if (status.value) status.value = { ...status.value, motors: result.motors }
+      ui.toast(result.unlocked ? t('pi.motorUnlocked', { name: motorName }) : t('pi.motorNotLocked', { name: motorName }))
+    })
   const setNetMode = (mode: 'ap' | 'auto') => guarded(async () => void (net.value = { ...(await client.value.setNetMode(mode)), enabled: true }))
   const hotspotNow = () => guarded(async () => void (net.value = { ...(await client.value.hotspotNow()), enabled: true }))
   const reboot = () =>
@@ -365,6 +391,10 @@ export const usePiStore = defineStore('pi', () => {
     hardware,
     cutCount,
     playing,
+    alerts,
+    sensors,
+    motors,
+    lockedMotors,
     init,
     setBaseUrl,
     setPin,
@@ -389,6 +419,8 @@ export const usePiStore = defineStore('pi', () => {
     setOverride,
     toggleOverride,
     clearOverrides,
+    clearAlerts,
+    unlockMotor,
     setNetMode,
     hotspotNow,
     reboot,

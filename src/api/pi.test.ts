@@ -412,3 +412,144 @@ describe('PiClient.subscribeStatus', () => {
     }
   })
 })
+
+/** Minimal `belen-api` for alerts and motors: records every call and answers from `routes`. */
+function fakeAlertsPi(routes: Record<string, (headers: Record<string, string>) => Response>) {
+  const calls: Array<{ method: string; path: string; headers: Record<string, string> }> = []
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const method = (init?.method ?? 'GET').toUpperCase()
+    const path = new URL(String(input), 'http://pi').pathname
+    const headers = Object.fromEntries(Object.entries((init?.headers as Record<string, string>) ?? {}).map(([k, v]) => [k.toLowerCase(), v]))
+    calls.push({ method, path, headers })
+    const route = routes[`${method} ${path}`]
+    return route ? route(headers) : new Response(JSON.stringify({ error: 'not_found', message: path }), { status: 404 })
+  }
+  return { fetchImpl, calls }
+}
+
+const jsonResponse = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+
+const TIMEOUT_ALERT = { code: 'motor_timeout', port: 'angel', message: "El motor «angel» ha superat el temps màxim.", at: '2026-10-21T14:00:00+00:00', direction: 'forward', locked: true }
+const LOCKED_MOTOR = { direction: null, runningS: 0, lastEnd: 'max_time', locked: true, blocked: false, limitForward: 'fc-dalt', limitReverse: null }
+
+describe('PiClient alerts and motors', () => {
+  it('reads the alerts with their extra fields', async () => {
+    const pi = fakeAlertsPi({ 'GET /api/alerts': () => jsonResponse(200, { alerts: [TIMEOUT_ALERT] }) })
+    const { c } = client(pi.fetchImpl)
+
+    const alerts = await c.getAlerts()
+
+    expect(alerts).toEqual([TIMEOUT_ALERT])
+    expect(alerts[0]!.direction).toBe('forward')
+    expect(pi.calls[0]!.headers.authorization).toBeUndefined()
+  })
+
+  it.each([
+    ['an empty list', { alerts: [] }],
+    ['a missing field', {}],
+    ['a non-array field', { alerts: 'nope' }],
+    ['an empty body', null],
+  ])('returns no alerts for %s', async (_label, body) => {
+    const pi = fakeAlertsPi({ 'GET /api/alerts': () => (body === null ? new Response('', { status: 200 }) : jsonResponse(200, body)) })
+    const { c } = client(pi.fetchImpl)
+
+    expect(await c.getAlerts()).toEqual([])
+  })
+
+  it('drops entries that are not objects and keeps unknown codes', async () => {
+    const unknown = { code: 'future_code', port: null, message: 'x', at: '2026-10-21T14:00:00+00:00' }
+    const pi = fakeAlertsPi({ 'GET /api/alerts': () => jsonResponse(200, { alerts: [null, 3, 'a', unknown] }) })
+    const { c } = client(pi.fetchImpl)
+
+    expect(await c.getAlerts()).toEqual([unknown])
+  })
+
+  it('clears the alerts with DELETE and the PIN header', async () => {
+    const pi = fakeAlertsPi({ 'DELETE /api/alerts': () => jsonResponse(200, { cleared: 2, alerts: [] }) })
+    const { c } = client(pi.fetchImpl)
+
+    const result = await c.clearAlerts()
+
+    expect(result).toEqual({ cleared: 2, alerts: [] })
+    expect(pi.calls[0]!.headers.authorization).toBe('Pin 123456')
+    expect(pi.calls[0]!.headers['x-name']).toBe('Joan')
+  })
+
+  it('refuses to clear alerts without a PIN and never touches the network', async () => {
+    const pi = fakeAlertsPi({})
+    const { c } = client(pi.fetchImpl, { pin: null })
+
+    const err = await c.clearAlerts().catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(PiApiError)
+    expect((err as PiApiError).code).toBe(PI_CODES.pinRequired)
+    expect((err as PiApiError).needsPin).toBe(true)
+    expect(pi.calls).toHaveLength(0)
+  })
+
+  it('maps a wrong PIN on clear to pin_invalid', async () => {
+    const pi = fakeAlertsPi({ 'DELETE /api/alerts': () => jsonResponse(401, { error: 'pin_invalid', message: 'PIN incorrecto' }) })
+    const { c } = client(pi.fetchImpl)
+
+    const err = (await c.clearAlerts().catch((e: unknown) => e)) as PiApiError
+
+    expect(err.status).toBe(401)
+    expect(err.code).toBe(PI_CODES.pinInvalid)
+    expect(err.needsPin).toBe(true)
+  })
+
+  it('unlocks a motor, encoding its name, and returns the motors', async () => {
+    const motors = { 'àngel 1': { ...LOCKED_MOTOR, locked: false } }
+    const pi = fakeAlertsPi({ 'POST /api/motors/%C3%A0ngel%201/unlock': () => jsonResponse(200, { motor: 'àngel 1', unlocked: true, motors }) })
+    const { c } = client(pi.fetchImpl)
+
+    const result = await c.unlockMotor('àngel 1')
+
+    expect(result).toEqual({ motor: 'àngel 1', unlocked: true, motors })
+    expect(pi.calls[0]!.method).toBe('POST')
+    expect(pi.calls[0]!.headers.authorization).toBe('Pin 123456')
+  })
+
+  it('passes through unlocked=false when the motor was not locked', async () => {
+    const pi = fakeAlertsPi({ 'POST /api/motors/angel/unlock': () => jsonResponse(200, { motor: 'angel', unlocked: false, motors: { angel: { ...LOCKED_MOTOR, locked: false } } }) })
+    const { c } = client(pi.fetchImpl)
+
+    const result = await c.unlockMotor('angel')
+
+    expect(result.unlocked).toBe(false)
+    expect(result.motors.angel!.locked).toBe(false)
+  })
+
+  it('fails with unknown_target for a port that is not a motor', async () => {
+    const pi = fakeAlertsPi({ 'POST /api/motors/llum/unlock': () => jsonResponse(404, { error: 'unknown_target', message: 'Motor desconocido: llum' }) })
+    const { c } = client(pi.fetchImpl)
+
+    const err = (await c.unlockMotor('llum').catch((e: unknown) => e)) as PiApiError
+
+    expect(err).toBeInstanceOf(PiApiError)
+    expect(err.code).toBe(PI_CODES.unknownTarget)
+    expect(err.needsPin).toBe(false)
+  })
+
+  it('refuses to unlock without a PIN and never touches the network', async () => {
+    const pi = fakeAlertsPi({})
+    const { c } = client(pi.fetchImpl, { pin: null })
+
+    const err = (await c.unlockMotor('angel').catch((e: unknown) => e)) as PiApiError
+
+    expect(err.code).toBe(PI_CODES.pinRequired)
+    expect(pi.calls).toHaveLength(0)
+  })
+
+  it('keeps sensors, motors and alerts of the status', async () => {
+    const sensors = { porta: { active: true, raw: false, onActive: 'stop_show', blocked: false, address: 'exp1:15' } }
+    const pi = fakeAlertsPi({ 'GET /api/status': () => jsonResponse(200, { state: 'IDLE', hardware: [], sensors, motors: { angel: LOCKED_MOTOR }, alerts: [TIMEOUT_ALERT] }) })
+    const { c } = client(pi.fetchImpl)
+
+    const status = await c.status()
+
+    expect(status.sensors).toEqual(sensors)
+    expect(status.motors?.angel?.locked).toBe(true)
+    expect(status.alerts).toEqual([TIMEOUT_ALERT])
+  })
+})

@@ -2,9 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import AlertsCard from '../components/AlertsCard.vue'
 import BundleList from '../components/BundleList.vue'
 import PinDialog from '../components/PinDialog.vue'
 import PortSwitches from '../components/PortSwitches.vue'
+import SensorList from '../components/SensorList.vue'
 import StatusCard from '../components/StatusCard.vue'
 import UploadProgress from '../components/UploadProgress.vue'
 import { useI18n } from '../i18n'
@@ -128,6 +130,8 @@ onBeforeUnmount(() => {
     </section>
 
     <template v-if="pi.connected">
+      <AlertsCard :alerts="pi.alerts" :motors="pi.motors" :busy="pi.busy" @clear="pi.clearAlerts()" @unlock="pi.unlockMotor($event)" />
+
       <StatusCard :status="pi.status" :info="pi.info" />
 
       <!-- Mandos -->
@@ -141,7 +145,17 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <PortSwitches :hardware="pi.hardware" :busy="pi.busy" @toggle="pi.toggleOverride($event)" @clear="pi.clearOverrides()" />
+      <PortSwitches
+        :hardware="pi.hardware"
+        :motors="pi.motors"
+        :sensors="pi.status?.sensors"
+        :busy="pi.busy"
+        @toggle="pi.toggleOverride($event)"
+        @clear="pi.clearOverrides()"
+        @unlock="pi.unlockMotor($event)"
+      />
+
+      <SensorList :sensors="pi.sensors" />
 
       <!-- Enviar des de la biblioteca -->
       <section class="panel">

@@ -62,6 +62,61 @@ export interface PiHardware {
   off: boolean
 }
 
+/** What the player does when a sensor becomes active (`onActive` of a `sensor` port). */
+export type SensorOnActive = 'none' | 'play' | 'stop_show' | 'panic'
+
+/** Live reading of a `sensor` port (`status.sensors[name]`, `InputController.snapshot`). */
+export interface PiSensor {
+  /** Debounced logical state (active level already applied). */
+  active: boolean
+  /** Raw pin level, null when it could not be read. */
+  raw: boolean | null
+  onActive: SensorOnActive
+  /** Cut by an override: the sensor is ignored. Panic sensors are never blocked. */
+  blocked: boolean
+  /** Human-readable input, e.g. `GPIO 20` or `exp1:15`. */
+  address: string
+}
+
+export type MotorDirection = 'forward' | 'reverse'
+
+/** Why the last run of a motor ended. */
+export type MotorEnd = 'time' | 'limit' | 'max_time' | 'stop' | 'blocked' | 'locked'
+
+/** Live state of a `motor` port (`status.motors[name]`, `MotorController.status`). */
+export interface PiMotor {
+  /** Direction it is turning now; null when stopped. */
+  direction: MotorDirection | null
+  /** Seconds of the current run; 0 when stopped. */
+  runningS: number
+  lastEnd: MotorEnd | null
+  /** Locked after a `max_time` timeout (with `lockOnTimeout`): it ignores the show until unlocked. */
+  locked: boolean
+  /** Cut by an override. */
+  blocked: boolean
+  limitForward: string | null
+  limitReverse: string | null
+}
+
+/** Alert codes the player raises today; others may appear and must be shown with a fallback. */
+export const PI_ALERT_CODES = ['motor_timeout', 'sensor_stop_show', 'sensor_panic'] as const
+export type PiAlertCode = (typeof PI_ALERT_CODES)[number]
+
+/** One entry of `status.alerts` / `GET /api/alerts` (the player keeps the last 50). */
+export interface PiAlert {
+  code: string
+  port: string | null
+  /** Already in Catalan; shown as-is. */
+  message: string
+  /** ISO 8601 timestamp (UTC). */
+  at: string
+  /** `motor_timeout`: direction that timed out. */
+  direction?: MotorDirection
+  /** `motor_timeout`: whether the motor got locked. */
+  locked?: boolean
+  [extra: string]: unknown
+}
+
 export interface PiStatus {
   state: PiState
   showHash: string | null
@@ -80,6 +135,12 @@ export interface PiStatus {
   uptimeS: number
   freeBytes: number | null
   version: string
+  /** Sensor ports by name (absent on players older than contract v3). */
+  sensors?: Record<string, PiSensor>
+  /** Motor ports by name (absent on players older than contract v3). */
+  motors?: Record<string, PiMotor>
+  /** Latest alerts, oldest first (absent on players older than contract v3). */
+  alerts?: PiAlert[]
 }
 
 export interface PiNet {
