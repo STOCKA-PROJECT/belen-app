@@ -4,9 +4,10 @@ import { computed } from 'vue'
 import { useI18n } from '../i18n'
 import type { PiInfo, PiStatus } from '../types'
 import { formatBytes, formatMs, formatUptime, percent } from '../util/format'
-import { clockLabel, scheduleNowLabel, scheduleWindowsLabel } from '../util/piLabels'
+import { clockLabel, rehearsalLabel, scheduleNowLabel, scheduleWindowsLabel, skippedMotorLabel } from '../util/piLabels'
 
-const props = defineProps<{ status: PiStatus | null; info: PiInfo | null }>()
+const props = defineProps<{ status: PiStatus | null; info: PiInfo | null; busy?: boolean }>()
+const emit = defineEmits<{ endRehearsal: [] }>()
 const { t } = useI18n()
 
 const STATE_BADGE: Record<string, string> = { PLAYING: 'badge-ok', IDLE: 'badge-brand', SAFE: 'badge-warn', ERROR: 'badge-danger', TEST: 'badge-hl', BOOT: '' }
@@ -66,6 +67,13 @@ const cyclePercent = computed(() => (playing.value ? percent(props.status?.cycle
       </div>
       <div class="progress" :class="{ 'is-ok': playing }">
         <span :style="{ width: `${cyclePercent}%` }" />
+      </div>
+      <div v-if="status?.rehearsal" class="notice notice-info">
+        <span class="label">{{ t('pi.rehearsal') }}</span>
+        <div class="value">{{ rehearsalLabel(status.rehearsal) }}</div>
+        <div v-for="m in status.rehearsal.skippedMotors" :key="m.target" class="value text-warn">{{ skippedMotorLabel(m) }}</div>
+        <div class="value">{{ t('pi.rehearsal.note') }}</div>
+        <button type="button" class="btn" :disabled="busy" @click="emit('endRehearsal')">{{ t('pi.rehearsal.end') }}</button>
       </div>
       <div v-if="status?.schedule">
         <span class="label">{{ t('pi.schedule') }}</span>

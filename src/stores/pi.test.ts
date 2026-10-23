@@ -69,6 +69,12 @@ function installFakePi(initial: PiStatus, unlockAnswer: (name: string) => Respon
       return null
     }
     if (method === 'GET' && path === '/api/status') return json(200, current)
+    if (method === 'DELETE' && path === '/api/rehearsal') {
+      const denied = pinDenied()
+      if (denied) return denied
+      current = { ...current, rehearsal: null, showName: 'Pessebre actiu' }
+      return json(200, current)
+    }
     if (method === 'DELETE' && path === '/api/alerts') {
       const denied = pinDenied()
       if (denied) return denied
@@ -155,6 +161,38 @@ describe('pi store: alerts, sensors and motors', () => {
 
       expect(pi.lockedMotors).toEqual(['angel'])
       expect(pi.motors.estrella?.direction).toBe('forward')
+    })
+  })
+
+  describe('endRehearsal', () => {
+    const rehearsal = { fromMs: 310_000, toMs: 340_000, loop: true, startedAt: '2026-10-23T12:00:00+00:00', showHash: null, showName: 'Assaig', showTimelineId: 1, skippedMotors: [] }
+
+    it('ends the rehearsal with the PIN and shows the active show again', async () => {
+      const fake = installFakePi(baseStatus({ rehearsal }))
+      const pi = usePiStore()
+      pi.setPin(PIN, 'Joan')
+      await pi.refreshStatus()
+      expect(pi.status?.rehearsal?.fromMs).toBe(310_000)
+
+      await pi.endRehearsal()
+
+      expect(fake.writes()).toEqual([{ method: 'DELETE', path: '/api/rehearsal', authorization: `Pin ${PIN}` }])
+      expect(pi.status?.rehearsal).toBeNull()
+      expect(pi.status?.showName).toBe('Pessebre actiu')
+    })
+
+    it('asks for the PIN first when there is none', async () => {
+      const fake = installFakePi(baseStatus({ rehearsal }))
+      const pi = usePiStore()
+      await pi.refreshStatus()
+
+      await pi.endRehearsal()
+
+      expect(pi.pinDialogOpen).toBe(true)
+      expect(fake.writes()).toEqual([])
+      await pi.submitPin(PIN, 'Joan')
+      expect(fake.writes()).toEqual([{ method: 'DELETE', path: '/api/rehearsal', authorization: `Pin ${PIN}` }])
+      expect(pi.status?.rehearsal).toBeNull()
     })
   })
 

@@ -132,13 +132,13 @@ onBeforeUnmount(() => {
     <template v-if="pi.connected">
       <AlertsCard :alerts="pi.alerts" :motors="pi.motors" :busy="pi.busy" @clear="pi.clearAlerts()" @unlock="pi.unlockMotor($event)" />
 
-      <StatusCard :status="pi.status" :info="pi.info" />
+      <StatusCard :status="pi.status" :info="pi.info" :busy="pi.busy" @end-rehearsal="pi.endRehearsal()" />
 
       <!-- Mandos -->
       <section class="panel">
         <div class="panel-body">
           <div class="row">
-            <button type="button" class="btn btn-primary btn-lg grow" :disabled="pi.busy || pi.playing || !pi.status?.showHash" @click="pi.play()">▶ {{ t('pi.play') }}</button>
+            <button type="button" class="btn btn-primary btn-lg grow" :disabled="pi.busy || pi.playing || !pi.status?.showHash || !!pi.status?.rehearsal" @click="pi.play()">▶ {{ t('pi.play') }}</button>
             <button type="button" class="btn btn-lg grow" :disabled="pi.busy || !pi.playing" @click="pi.stop()">■ {{ t('pi.stop') }}</button>
           </div>
           <button type="button" class="btn btn-danger-solid btn-lg btn-block" :disabled="pi.busy" @click="confirmThen(t('pi.confirmPanic'), () => pi.panic())">{{ t('pi.panic') }}</button>

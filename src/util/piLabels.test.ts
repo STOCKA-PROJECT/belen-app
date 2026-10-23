@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { setLocale } from '../i18n'
-import type { PiAlert, PiMotor, PiSchedule } from '../types'
-import { alertTitle, clockLabel, formatAgo, isKnownAlertCode, motorLastEndLabel, motorStateLabel, piTimeLabel, scheduleNowLabel, scheduleWindowsLabel, sensorCanBeCut, sensorOnActiveLabel, sensorReadingLabel, timeAgo, unlockableAlerts } from './piLabels'
+import type { PiAlert, PiMotor, PiRehearsal, PiSchedule } from '../types'
+import { alertTitle, clockLabel, formatAgo, isKnownAlertCode, motorLastEndLabel, motorStateLabel, piTimeLabel, rehearsalLabel, scheduleNowLabel, scheduleWindowsLabel, sensorCanBeCut, sensorOnActiveLabel, sensorReadingLabel, skippedMotorLabel, timeAgo, unlockableAlerts } from './piLabels'
 
 const NOW = Date.parse('2026-10-21T14:00:00Z')
 const alert = (overrides: Partial<PiAlert> = {}): PiAlert => ({ code: 'motor_timeout', port: 'angel', message: '', at: '2026-10-21T13:59:00Z', ...overrides })
@@ -157,5 +157,30 @@ describe('schedule and clock labels', () => {
     expect(clockLabel({ reliable: true, source: 'ntp', now: '2026-10-23T18:30:00' })).toBe('dv 18:30 (Internet)')
     expect(clockLabel({ reliable: true, source: 'client', now: '2026-10-23T18:30:00' })).toBe('dv 18:30 (d’un mòbil o un ordinador)')
     expect(clockLabel({ reliable: false, source: null, now: '2026-10-23T18:30:00' })).toContain('No la sap')
+  })
+
+  describe('rehearsal', () => {
+    const rehearsal = (overrides: Partial<PiRehearsal> = {}): PiRehearsal => ({
+      fromMs: 310_000, toMs: 340_500, loop: false, startedAt: '', showHash: null, showName: 'Pessebre 2026', showTimelineId: 1, skippedMotors: [], ...overrides,
+    })
+
+    it('names the show and the range', () => {
+      expect(rehearsalLabel(rehearsal())).toBe('«Pessebre 2026» · 5:10 → 5:40')
+    })
+
+    it('says when it loops and copes without a name', () => {
+      expect(rehearsalLabel(rehearsal({ loop: true, showName: null }))).toBe('«cap» · 5:10 → 5:40 · en bucle')
+    })
+
+    it('explains why a motor does not move', () => {
+      expect(skippedMotorLabel({ target: 'Àngel', reason: 'cut', forward: 1, reverse: 0 })).toBe('Àngel no es mou: un clip queda tallat pel tram')
+      expect(skippedMotorLabel({ target: 'Àngel', reason: 'unbalanced', forward: 2, reverse: 1 })).toBe('Àngel no es mou: 2 «Girar» i 1 «Girar (invertit)»')
+    })
+
+    it('translates to Spanish', () => {
+      setLocale('es')
+      expect(rehearsalLabel(rehearsal({ loop: true }))).toBe('«Pessebre 2026» · 5:10 → 5:40 · en bucle')
+      expect(skippedMotorLabel({ target: 'Àngel', reason: 'cut', forward: 1, reverse: 0 })).toBe('Àngel no se mueve: un clip queda cortado por el tramo')
+    })
   })
 })

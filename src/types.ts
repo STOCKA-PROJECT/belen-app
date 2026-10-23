@@ -123,6 +123,26 @@ export interface PiAlert {
   [extra: string]: unknown
 }
 
+/** A motor the Pi does not move in a rehearsal: a clip cut by the range, or not as many turns as returns. */
+export interface PiSkippedMotor {
+  target: string
+  reason: 'cut' | 'unbalanced'
+  forward: number
+  reverse: number
+}
+
+/** A rehearsal from the timeline editor: a range of a show that lives only in the Pi's memory. */
+export interface PiRehearsal {
+  fromMs: number
+  toMs: number
+  loop: boolean
+  startedAt: string
+  showHash: string | null
+  showName: string | null
+  showTimelineId: number | null
+  skippedMotors: PiSkippedMotor[]
+}
+
 export interface PiStatus {
   state: PiState
   showHash: string | null
@@ -151,6 +171,8 @@ export interface PiStatus {
   motors?: Record<string, PiMotor>
   /** Latest alerts, oldest first (absent on players older than contract v3). */
   alerts?: PiAlert[]
+  /** A rehearsal from the editor, while it lasts (`showHash` stays the active show). */
+  rehearsal?: PiRehearsal | null
 }
 
 export type PiScheduleDay = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'

@@ -185,6 +185,11 @@ export class PiClient {
     return this.json('/api/panic', { method: 'POST', pin: true })
   }
 
+  /** Ends a rehearsal started from the editor: the Pi goes back to its active show. */
+  endRehearsal(): Promise<PiStatus> {
+    return this.json('/api/rehearsal', { method: 'DELETE', pin: true })
+  }
+
   activate(hash: string): Promise<PiStatus> {
     return this.json(`/api/bundles/${encodeURIComponent(hash)}/activate`, { method: 'POST', pin: true })
   }

@@ -1,5 +1,6 @@
 import { t } from '../i18n'
-import { PI_ALERT_CODES, type PiAlert, type PiAlertCode, type PiClock, type PiMotor, type PiSchedule, type PiScheduleDay, type PiSensor } from '../types'
+import { PI_ALERT_CODES, type PiAlert, type PiAlertCode, type PiClock, type PiMotor, type PiRehearsal, type PiSchedule, type PiScheduleDay, type PiSensor, type PiSkippedMotor } from '../types'
+import { formatMs } from './format'
 
 /** True for the alert codes the app has a label for. */
 export function isKnownAlertCode(code: string): code is PiAlertCode {
@@ -124,4 +125,18 @@ export function scheduleNowLabel(schedule: PiSchedule): string {
 export function clockLabel(clock: PiClock): string {
   if (!clock.reliable) return t('pi.clock.unreliable')
   return `${piTimeLabel(clock.now)} (${t(clock.source === 'ntp' ? 'pi.clock.ntp' : 'pi.clock.client')})`
+}
+
+/** «Pessebre 2026» · 5:10 → 5:40 · en bucle */
+export function rehearsalLabel(rehearsal: PiRehearsal): string {
+  const parts = [`«${rehearsal.showName || t('common.none')}»`, `${formatMs(rehearsal.fromMs)} → ${formatMs(rehearsal.toMs)}`]
+  if (rehearsal.loop) parts.push(t('pi.rehearsal.loop'))
+  return parts.join(' · ')
+}
+
+/** Why a motor does not move in the rehearsal. */
+export function skippedMotorLabel(motor: PiSkippedMotor): string {
+  return motor.reason === 'cut'
+    ? t('pi.rehearsal.cut', { motor: motor.target })
+    : t('pi.rehearsal.unbalanced', { motor: motor.target, forward: motor.forward, reverse: motor.reverse })
 }

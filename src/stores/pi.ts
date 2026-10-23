@@ -260,6 +260,7 @@ export const usePiStore = defineStore('pi', () => {
   const play = () => guarded(async () => void (status.value = await client.value.play()))
   const stop = () => guarded(async () => void (status.value = await client.value.stop()))
   const panic = () => guarded(async () => void (status.value = await client.value.panic()))
+  const endRehearsal = () => guarded(async () => void (status.value = await client.value.endRehearsal()))
   const rollback = () =>
     guarded(async () => {
       status.value = await client.value.rollback()
@@ -425,6 +426,7 @@ export const usePiStore = defineStore('pi', () => {
     play,
     stop,
     panic,
+    endRehearsal,
     rollback,
     activate,
     deleteBundle,
