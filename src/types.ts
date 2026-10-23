@@ -74,8 +74,14 @@ export interface PiSensor {
   onActive: SensorOnActive
   /** Cut by an override: the sensor is ignored. Panic sensors are never blocked. */
   blocked: boolean
-  /** Human-readable input, e.g. `GPIO 20` or `exp1:15`. */
+  /** Human-readable input, e.g. `GPIO 20`, `exp1:15` or `vl53l0x I2C 1:0x29`. */
   address: string
+  /** Measured sensors only (`source: measured`): last value (null = no reading), its unit and the threshold. */
+  value?: number | null
+  unit?: string | null
+  quantity?: string | null
+  threshold?: number
+  activeWhen?: 'above' | 'below'
 }
 
 export type MotorDirection = 'forward' | 'reverse'

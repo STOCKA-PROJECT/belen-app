@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { setLocale } from '../i18n'
 import type { PiAlert, PiMotor } from '../types'
-import { alertTitle, formatAgo, isKnownAlertCode, motorLastEndLabel, motorStateLabel, sensorCanBeCut, sensorOnActiveLabel, timeAgo, unlockableAlerts } from './piLabels'
+import { alertTitle, formatAgo, isKnownAlertCode, motorLastEndLabel, motorStateLabel, sensorCanBeCut, sensorOnActiveLabel, sensorReadingLabel, timeAgo, unlockableAlerts } from './piLabels'
 
 const NOW = Date.parse('2026-10-21T14:00:00Z')
 const alert = (overrides: Partial<PiAlert> = {}): PiAlert => ({ code: 'motor_timeout', port: 'angel', message: '', at: '2026-10-21T13:59:00Z', ...overrides })
@@ -92,6 +92,12 @@ describe('piLabels', () => {
       expect(sensorOnActiveLabel('stop_show')).toBe('atura el show')
       expect(sensorOnActiveLabel('panic')).toBe('tot en segur')
       expect(sensorOnActiveLabel('blink')).toBe('blink')
+    })
+
+    it('shows the reading of a measured sensor against its threshold, nothing for a digital one', () => {
+      expect(sensorReadingLabel({ value: 18.5, unit: 'cm', threshold: 20, activeWhen: 'below' })).toBe('18.5 cm (≤ 20 cm)')
+      expect(sensorReadingLabel({ value: null, unit: '°C', threshold: 40, activeWhen: 'above' })).toBe('sense lectura (≥ 40 °C)')
+      expect(sensorReadingLabel({})).toBeNull()
     })
 
     it('refuses to cut panic sensors only', () => {

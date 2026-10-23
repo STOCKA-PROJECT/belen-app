@@ -64,6 +64,14 @@ export function sensorOnActiveLabel(onActive: PiSensor['onActive'] | string): st
   }
 }
 
+/** A measured sensor's reading against its threshold («18.5 cm (≤ 20 cm)»); null for digital sensors. */
+export function sensorReadingLabel(sensor: Pick<PiSensor, 'value' | 'unit' | 'threshold' | 'activeWhen'>): string | null {
+  if (sensor.value === undefined) return null
+  const unit = sensor.unit ? ` ${sensor.unit}` : ''
+  const value = sensor.value === null ? t('pi.sensorNoReading') : `${sensor.value}${unit}`
+  return `${value} (${sensor.activeWhen === 'above' ? '≥' : '≤'} ${sensor.threshold ?? '?'}${unit})`
+}
+
 /** Panic sensors cannot be cut: the Pi keeps reading them whatever the override says. */
 export function sensorCanBeCut(sensor: Pick<PiSensor, 'onActive'> | undefined): boolean {
   return sensor?.onActive !== 'panic'

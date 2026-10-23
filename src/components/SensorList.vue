@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from '../i18n'
 import type { NamedSensor } from '../stores/pi'
-import { sensorOnActiveLabel } from '../util/piLabels'
+import { sensorOnActiveLabel, sensorReadingLabel } from '../util/piLabels'
 
 /** Live readings of the sensor ports; cutting them is done from the port list. */
 defineProps<{ sensors: NamedSensor[] }>()
@@ -18,7 +18,9 @@ const { t } = useI18n()
           <div class="list-item-main">
             <span class="name truncate">{{ sensor.name }}</span>
             <span class="meta">
-              <span class="mono">{{ sensor.address }}</span> · {{ sensorOnActiveLabel(sensor.onActive) }} ·
+              <span class="mono">{{ sensor.address }}</span>
+              <template v-if="sensorReadingLabel(sensor)"> · <span class="mono">{{ sensorReadingLabel(sensor) }}</span></template>
+              · {{ sensorOnActiveLabel(sensor.onActive) }} ·
               <span :class="sensor.active ? 'text-ok' : ''">{{ sensor.active ? t('pi.sensorActive') : t('pi.sensorInactive') }}</span>
             </span>
           </div>
