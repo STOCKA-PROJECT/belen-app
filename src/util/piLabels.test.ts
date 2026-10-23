@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { setLocale } from '../i18n'
-import type { PiAlert, PiMotor } from '../types'
-import { alertTitle, formatAgo, isKnownAlertCode, motorLastEndLabel, motorStateLabel, sensorCanBeCut, sensorOnActiveLabel, sensorReadingLabel, timeAgo, unlockableAlerts } from './piLabels'
+import type { PiAlert, PiMotor, PiSchedule } from '../types'
+import { alertTitle, clockLabel, formatAgo, isKnownAlertCode, motorLastEndLabel, motorStateLabel, piTimeLabel, scheduleNowLabel, scheduleWindowsLabel, sensorCanBeCut, sensorOnActiveLabel, sensorReadingLabel, timeAgo, unlockableAlerts } from './piLabels'
 
 const NOW = Date.parse('2026-10-21T14:00:00Z')
 const alert = (overrides: Partial<PiAlert> = {}): PiAlert => ({ code: 'motor_timeout', port: 'angel', message: '', at: '2026-10-21T13:59:00Z', ...overrides })
@@ -120,5 +120,42 @@ describe('piLabels', () => {
       expect(motorLastEndLabel(motor({ lastEnd: 'max_time' }))).toBe('última aturada: temps màxim')
       expect(motorLastEndLabel({ lastEnd: 'weird' as PiMotor['lastEnd'] })).toBe('última aturada: weird')
     })
+  })
+})
+
+describe('schedule and clock labels', () => {
+  beforeEach(() => setLocale('ca'))
+  const schedule = (overrides: Partial<PiSchedule> = {}): PiSchedule => ({
+    rule: 'allow',
+    windows: [{ days: ['fri', 'mon'], from: '17:00', to: '21:00' }],
+    applies: true,
+    open: true,
+    nextChange: '2026-10-23T21:00',
+    ...overrides,
+  })
+
+  it('formats the Pi local time with the day', () => {
+    expect(piTimeLabel('2026-10-23T18:30:05')).toBe('dv 18:30')
+    expect(piTimeLabel('nope')).toBe('nope')
+    setLocale('es')
+    expect(piTimeLabel('2026-10-24T09:05')).toBe('sá 09:05')
+  })
+
+  it('lists the windows in week order with the rule', () => {
+    expect(scheduleWindowsLabel(schedule())).toBe('Només dl, dv 17:00–21:00')
+    expect(scheduleWindowsLabel(schedule({ rule: 'block', windows: [{ days: ['sun'], from: '13:00', to: '16:00' }, { days: ['sat'], from: '22:00', to: '02:00' }] })))
+      .toBe('Excepte dg 13:00–16:00; ds 22:00–02:00')
+  })
+
+  it('says whether the button works now and until when', () => {
+    expect(scheduleNowLabel(schedule())).toBe('ara funciona fins dv 21:00')
+    expect(scheduleNowLabel(schedule({ open: false, nextChange: null }))).toBe('ara no funciona')
+    expect(scheduleNowLabel(schedule({ applies: false }))).toContain('funciona sempre')
+  })
+
+  it('labels the clock by source and warns when unreliable', () => {
+    expect(clockLabel({ reliable: true, source: 'ntp', now: '2026-10-23T18:30:00' })).toBe('dv 18:30 (Internet)')
+    expect(clockLabel({ reliable: true, source: 'client', now: '2026-10-23T18:30:00' })).toBe('dv 18:30 (d’un mòbil o un ordinador)')
+    expect(clockLabel({ reliable: false, source: null, now: '2026-10-23T18:30:00' })).toContain('No la sap')
   })
 })

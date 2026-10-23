@@ -1,5 +1,5 @@
 import { t } from '../i18n'
-import { PI_ALERT_CODES, type PiAlert, type PiAlertCode, type PiMotor, type PiSensor } from '../types'
+import { PI_ALERT_CODES, type PiAlert, type PiAlertCode, type PiClock, type PiMotor, type PiSchedule, type PiScheduleDay, type PiSensor } from '../types'
 
 /** True for the alert codes the app has a label for. */
 export function isKnownAlertCode(code: string): code is PiAlertCode {
@@ -93,4 +93,35 @@ export function motorLastEndLabel(motor: Pick<PiMotor, 'lastEnd'>): string | nul
   const known = ['time', 'limit', 'max_time', 'stop', 'blocked', 'locked'] as const
   const reason = (known as readonly string[]).includes(end) ? t(`pi.motorEnd.${end as (typeof known)[number]}` as const) : String(end)
   return t('pi.motorLastEnd', { reason })
+}
+
+const SCHEDULE_DAYS: PiScheduleDay[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+
+/** «dv 18:30» from a local ISO time of the Pi (no offset: read as local time); the input when unparsable. */
+export function piTimeLabel(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const day = t(`pi.day.${SCHEDULE_DAYS[(d.getDay() + 6) % 7]!}` as const)
+  return `${day} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+/** «Només dl, dv 17:00–21:00» / «Excepte …» */
+export function scheduleWindowsLabel(schedule: Pick<PiSchedule, 'rule' | 'windows'>): string {
+  const windows = schedule.windows
+    .map((w) => `${SCHEDULE_DAYS.filter((d) => w.days.includes(d)).map((d) => t(`pi.day.${d}` as const)).join(', ')} ${w.from}–${w.to}`)
+    .join('; ')
+  return `${t(schedule.rule === 'allow' ? 'pi.schedule.allow' : 'pi.schedule.block')} ${windows}`
+}
+
+/** Whether the button works now and until when; while the Pi lacks the time, that it always works. */
+export function scheduleNowLabel(schedule: PiSchedule): string {
+  if (!schedule.applies) return t('pi.schedule.ignored')
+  const now = t(schedule.open ? 'pi.schedule.open' : 'pi.schedule.closed')
+  return schedule.nextChange ? t('pi.schedule.until', { now, when: piTimeLabel(schedule.nextChange) }) : now
+}
+
+/** «dv 18:30 (Internet)» or a warning that the Pi does not know the time. */
+export function clockLabel(clock: PiClock): string {
+  if (!clock.reliable) return t('pi.clock.unreliable')
+  return `${piTimeLabel(clock.now)} (${t(clock.source === 'ntp' ? 'pi.clock.ntp' : 'pi.clock.client')})`
 }

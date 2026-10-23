@@ -130,6 +130,10 @@ export interface PiStatus {
   board: string | null
   durationMs: number | null
   mode: { on: string; cycles: number } | null
+  /** Button schedule of the active show as the Pi applies it now (absent on older players, null without one). */
+  schedule?: PiSchedule | null
+  /** The Pi's wall clock (absent on older players). */
+  clock?: PiClock
   cycle: number
   cyclesTarget: number | null
   cycleMs: number
@@ -147,6 +151,27 @@ export interface PiStatus {
   motors?: Record<string, PiMotor>
   /** Latest alerts, oldest first (absent on players older than contract v3). */
   alerts?: PiAlert[]
+}
+
+export type PiScheduleDay = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+
+/** When a short press of the button starts the show: `allow` only inside a window, `block` never inside one. */
+export interface PiSchedule {
+  rule: 'allow' | 'block'
+  windows: Array<{ days: PiScheduleDay[]; from: string; to: string }>
+  /** False while the Pi does not know the time: the button then always works. */
+  applies: boolean
+  open: boolean
+  /** Local time of the Pi (ISO, minutes) when `open` changes next, within 8 days. */
+  nextChange: string | null
+}
+
+/** The Pi has no battery clock: its time is reliable with NTP or once a phone or the editor gave it. */
+export interface PiClock {
+  reliable: boolean
+  source: 'ntp' | 'client' | null
+  /** Local time of the Pi, ISO without offset. */
+  now: string
 }
 
 export interface PiNet {

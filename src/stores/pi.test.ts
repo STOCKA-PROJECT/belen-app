@@ -289,3 +289,66 @@ describe('pi store: alerts, sensors and motors', () => {
     })
   })
 })
+
+describe('pi store: clock sync on connect', () => {
+  beforeEach(() => {
+    setStorage({ kv: createMemoryKv(), files: createMemoryBundleFiles() })
+    setActivePinia(createPinia())
+    setLocale('ca')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** The endpoints `connect` reads, plus `/api/clock` answering `clockStatus`. */
+  function installConnectPi(reliable: boolean, clockStatus = 200) {
+    let clock = { reliable, source: reliable ? 'ntp' : null, now: '2026-10-23T18:30:00' }
+    const posts: Array<{ body: unknown; authorization: string | undefined }> = []
+    const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase()
+      const path = new URL(String(input), 'http://pi').pathname.replace(/^\/__pi/, '')
+      if (method === 'GET' && path === '/api/info') return json(200, { device: { name: 'Pessebre' }, version: 't', uptimeS: 1, freeBytes: 1 })
+      if (method === 'GET' && path === '/api/status') return json(200, baseStatus({ clock } as Partial<PiStatus>))
+      if (method === 'GET' && path === '/api/bundles') return json(200, { active: null, previous: null, bundles: [] })
+      if (method === 'GET' && path === '/api/net') return json(200, { enabled: false })
+      if (method === 'POST' && path === '/api/clock') {
+        posts.push({ body: JSON.parse(String(init?.body)), authorization: (init?.headers as Record<string, string>)?.Authorization })
+        if (clockStatus !== 200) return json(clockStatus, { error: 'not_found', message: 'no' })
+        clock = { reliable: true, source: 'client', now: clock.now }
+        return json(200, { ...clock, adjusted: true, offsetMs: 1000 })
+      }
+      return json(404, { error: 'not_found', message: path })
+    }))
+    return posts
+  }
+
+  it('gives the Pi the phone time when its clock is not reliable, without PIN', async () => {
+    const posts = installConnectPi(false)
+    const store = usePiStore()
+    expect(await store.connect()).toBe(true)
+    expect(posts).toHaveLength(1)
+    expect(typeof (posts[0]!.body as { epochMs: number }).epochMs).toBe('number')
+    expect(posts[0]!.authorization).toBeUndefined()
+    expect(store.status?.clock?.reliable).toBe(true)
+    store.disconnect()
+  })
+
+  it('leaves a reliable clock alone', async () => {
+    const posts = installConnectPi(true)
+    const store = usePiStore()
+    expect(await store.connect()).toBe(true)
+    expect(posts).toHaveLength(0)
+    store.disconnect()
+  })
+
+  it('still connects when the Pi refuses or lacks the endpoint', async () => {
+    const posts = installConnectPi(false, 404)
+    const store = usePiStore()
+    expect(await store.connect()).toBe(true)
+    expect(posts).toHaveLength(1)
+    expect(store.status?.clock?.reliable).toBe(false)
+    store.disconnect()
+  })
+})

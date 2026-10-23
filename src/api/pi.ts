@@ -1,5 +1,5 @@
 import type { BundleSource } from '../storage/bundleFiles'
-import type { ImportReport, OverrideMode, PiAlert, PiBundles, PiInfo, PiMotor, PiNet, PiStatus, PiUpload } from '../types'
+import type { ImportReport, OverrideMode, PiAlert, PiBundles, PiClock, PiInfo, PiMotor, PiNet, PiStatus, PiUpload } from '../types'
 import { joinUrl } from '../util/url'
 import { isRecord, NetworkError, readJsonBody, safeFetch } from './errors'
 
@@ -164,6 +164,14 @@ export class PiClient {
   }
 
   // ---------------------------------------------------------------- control (PIN)
+
+  /**
+   * `POST /api/clock`: gives the Pi this phone's time (it has no battery clock and no Internet at the
+   * belén). The PIN goes along when known; the Pi only asks for it once its time is already reliable.
+   */
+  syncClock(epochMs: number = Date.now()): Promise<PiClock & { adjusted: boolean; offsetMs: number }> {
+    return this.json('/api/clock', { method: 'POST', body: JSON.stringify({ epochMs }), pin: this.pin !== null })
+  }
 
   play(cycles?: number): Promise<PiStatus> {
     return this.json('/api/play', { method: 'POST', body: JSON.stringify(cycles ? { cycles } : {}), pin: true })

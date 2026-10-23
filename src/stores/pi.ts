@@ -139,6 +139,7 @@ export const usePiStore = defineStore('pi', () => {
       lastGoodUrl.value = baseUrl.value
       await persistSettings()
       await Promise.all([refreshStatus(), refreshBundles(), refreshNet()])
+      await syncClock()
       subscribe()
       return true
     } catch (err) {
@@ -186,6 +187,17 @@ export const usePiStore = defineStore('pi', () => {
 
   async function refreshStatus(): Promise<void> {
     status.value = await client.value.status()
+  }
+
+  /** The Pi has no battery clock: when its time is not reliable, give it the phone's. Never fails the connection. */
+  async function syncClock(): Promise<void> {
+    if (!status.value?.clock || status.value.clock.reliable) return
+    try {
+      await client.value.syncClock()
+      await refreshStatus()
+    } catch {
+      // without the time the Pi ignores the schedule and the button keeps working
+    }
   }
 
   async function refreshBundles(): Promise<void> {

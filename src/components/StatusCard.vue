@@ -4,6 +4,7 @@ import { computed } from 'vue'
 import { useI18n } from '../i18n'
 import type { PiInfo, PiStatus } from '../types'
 import { formatBytes, formatMs, formatUptime, percent } from '../util/format'
+import { clockLabel, scheduleNowLabel, scheduleWindowsLabel } from '../util/piLabels'
 
 const props = defineProps<{ status: PiStatus | null; info: PiInfo | null }>()
 const { t } = useI18n()
@@ -65,6 +66,15 @@ const cyclePercent = computed(() => (playing.value ? percent(props.status?.cycle
       </div>
       <div class="progress" :class="{ 'is-ok': playing }">
         <span :style="{ width: `${cyclePercent}%` }" />
+      </div>
+      <div v-if="status?.schedule">
+        <span class="label">{{ t('pi.schedule') }}</span>
+        <div class="value">{{ scheduleWindowsLabel(status.schedule) }}</div>
+        <div class="value">{{ scheduleNowLabel(status.schedule) }}</div>
+      </div>
+      <div v-if="status?.clock">
+        <span class="label">{{ t('pi.clock') }}</span>
+        <div class="value" :class="{ 'text-warn': !status.clock.reliable }">{{ clockLabel(status.clock) }}</div>
       </div>
       <p v-if="status?.lastError" class="notice notice-danger">
         <strong>{{ t('pi.lastError') }}:</strong> {{ status.lastError }}
