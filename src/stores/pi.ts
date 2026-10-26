@@ -38,6 +38,11 @@ export interface NamedSensor extends PiSensor {
   name: string
 }
 
+/** Alphabetical order of port names, ignoring case and accents, with numbers by value ("relé 2" before "relé 10"). */
+function compareNames(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+}
+
 /** Connection, live status and every command of the Raspberry Pi. */
 export const usePiStore = defineStore('pi', () => {
   const ui = useUiStore()
@@ -75,13 +80,18 @@ export const usePiStore = defineStore('pi', () => {
   let statusFailures = 0
 
   const client = computed(() => new PiClient({ baseUrl: baseUrl.value, pin: pin.value, name: name.value || null }))
-  const hardware = computed<PiHardware[]>(() => status.value?.hardware ?? [])
+  /** Ports of the live status in alphabetical order. */
+  const hardware = computed<PiHardware[]>(() => [...(status.value?.hardware ?? [])].sort((a, b) => compareNames(a.name, b.name)))
   const cutCount = computed(() => hardware.value.filter((h) => h.off).length)
   const playing = computed(() => status.value?.state === 'PLAYING')
   /** Alerts of the live status, newest first. */
   const alerts = computed<PiAlert[]>(() => [...(status.value?.alerts ?? [])].reverse())
-  /** Sensors of the live status, in the order the Pi lists them. */
-  const sensors = computed<NamedSensor[]>(() => Object.entries(status.value?.sensors ?? {}).map(([sensorName, s]) => ({ ...s, name: sensorName })))
+  /** Sensors of the live status in alphabetical order. */
+  const sensors = computed<NamedSensor[]>(() =>
+    Object.entries(status.value?.sensors ?? {})
+      .map(([sensorName, s]) => ({ ...s, name: sensorName }))
+      .sort((a, b) => compareNames(a.name, b.name)),
+  )
   /** Motors of the live status by port name. */
   const motors = computed<Record<string, PiMotor>>(() => status.value?.motors ?? {})
   const lockedMotors = computed(() => Object.keys(motors.value).filter((m) => motors.value[m]?.locked))

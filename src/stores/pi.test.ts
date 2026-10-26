@@ -5,7 +5,7 @@ import { setLocale } from '../i18n'
 import { setStorage } from '../storage'
 import { createMemoryBundleFiles } from '../storage/bundleFiles'
 import { createMemoryKv } from '../storage/kv'
-import type { PiAlert, PiMotor, PiStatus } from '../types'
+import type { PiAlert, PiHardware, PiMotor, PiStatus } from '../types'
 import { usePiStore } from './pi'
 import { useUiStore } from './ui'
 
@@ -142,7 +142,7 @@ describe('pi store: alerts, sensors and motors', () => {
       expect(pi.status!.alerts).toEqual([older, newer])
     })
 
-    it('names the sensors and keeps the Pi order', () => {
+    it('names the sensors and sorts them alphabetically', () => {
       const pi = usePiStore()
       pi.status = baseStatus({
         sensors: {
@@ -151,8 +151,17 @@ describe('pi store: alerts, sensors and motors', () => {
         },
       })
 
-      expect(pi.sensors.map((s) => s.name)).toEqual(['porta', 'boto'])
-      expect(pi.sensors[1]).toMatchObject({ name: 'boto', blocked: true, address: 'GPIO 20', onActive: 'play' })
+      expect(pi.sensors.map((s) => s.name)).toEqual(['boto', 'porta'])
+      expect(pi.sensors[0]).toMatchObject({ name: 'boto', blocked: true, address: 'GPIO 20', onActive: 'play' })
+    })
+
+    it('sorts the ports alphabetically, ignoring case and with numbers by value', () => {
+      const pi = usePiStore()
+      const hw = (name: string): PiHardware => ({ name, kind: 'relay', off: false })
+      pi.status = baseStatus({ hardware: [hw('relé 10'), hw('Àngel'), hw('relé 2'), hw('bou')] })
+
+      expect(pi.hardware.map((h) => h.name)).toEqual(['Àngel', 'bou', 'relé 2', 'relé 10'])
+      expect(pi.status!.hardware.map((h) => h.name)).toEqual(['relé 10', 'Àngel', 'relé 2', 'bou'])
     })
 
     it('reports which motors are locked', () => {
