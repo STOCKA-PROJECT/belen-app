@@ -178,6 +178,12 @@ export interface PiRehearsal {
   skippedMotors: PiSkippedMotor[]
 }
 
+/** Where the Pi's sound goes: it must be the USB adapter (the jack shares the PWM with the LED strips). */
+export interface PiAudio {
+  sink: string
+  kind: 'usb' | 'jack' | 'hdmi' | 'other'
+}
+
 export interface PiStatus {
   state: PiState
   showHash: string | null
@@ -189,6 +195,8 @@ export interface PiStatus {
   schedule?: PiSchedule | null
   /** The Pi's wall clock (absent on older players). */
   clock?: PiClock
+  /** Default audio output (absent on older players; null when the Pi cannot tell). */
+  audio?: PiAudio | null
   cycle: number
   cyclesTarget: number | null
   cycleMs: number

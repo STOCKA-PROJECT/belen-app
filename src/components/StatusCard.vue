@@ -4,7 +4,7 @@ import { computed } from 'vue'
 import { useI18n } from '../i18n'
 import type { PiInfo, PiStatus } from '../types'
 import { formatBytes, formatMs, formatUptime, percent } from '../util/format'
-import { clockLabel, rehearsalLabel, scheduleNowLabel, scheduleWindowsLabel, skippedMotorLabel } from '../util/piLabels'
+import { audioOutputLabel, clockLabel, rehearsalLabel, scheduleNowLabel, scheduleWindowsLabel, skippedMotorLabel } from '../util/piLabels'
 
 const props = defineProps<{ status: PiStatus | null; info: PiInfo | null; busy?: boolean }>()
 const emit = defineEmits<{ endRehearsal: [] }>()
@@ -79,6 +79,10 @@ const cyclePercent = computed(() => (playing.value ? percent(props.status?.cycle
         <span class="label">{{ t('pi.schedule') }}</span>
         <div class="value">{{ scheduleWindowsLabel(status.schedule) }}</div>
         <div class="value">{{ scheduleNowLabel(status.schedule) }}</div>
+      </div>
+      <div v-if="status?.audio">
+        <span class="label">{{ t('pi.audio') }}</span>
+        <div class="value" :class="{ 'text-warn': status.audio.kind !== 'usb' }">{{ audioOutputLabel(status.audio) }}</div>
       </div>
       <div v-if="status?.clock">
         <span class="label">{{ t('pi.clock') }}</span>

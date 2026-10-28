@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { setLocale } from '../i18n'
 import type { PiAlert, PiMotor, PiRehearsal, PiSchedule } from '../types'
-import { alertTitle, audioLabel, clockLabel, formatAgo, hexToRgb, isKnownAlertCode, motorLastEndLabel, motorStateLabel, piTimeLabel, rehearsalLabel, scheduleNowLabel, scheduleWindowsLabel, sensorCanBeCut, sensorOnActiveLabel, sensorReadingLabel, skippedMotorLabel, timeAgo, unlockableAlerts } from './piLabels'
+import { alertTitle, audioLabel, audioOutputLabel, clockLabel, formatAgo, hexToRgb, isKnownAlertCode, motorLastEndLabel, motorStateLabel, piTimeLabel, rehearsalLabel, scheduleNowLabel, scheduleWindowsLabel, sensorCanBeCut, sensorOnActiveLabel, sensorReadingLabel, skippedMotorLabel, timeAgo, unlockableAlerts } from './piLabels'
 
 const NOW = Date.parse('2026-10-21T14:00:00Z')
 const alert = (overrides: Partial<PiAlert> = {}): PiAlert => ({ code: 'motor_timeout', port: 'angel', message: '', at: '2026-10-21T13:59:00Z', ...overrides })
@@ -209,5 +209,23 @@ describe('hexToRgb', () => {
 
   it.each([['#fff'], ['red'], [''], ['#gg0000']])('falls back to black for %s', (hex) => {
     expect(hexToRgb(hex)).toEqual([0, 0, 0])
+  })
+})
+
+describe('audioOutputLabel', () => {
+  beforeEach(() => setLocale('ca'))
+
+  it('names the USB adapter', () => {
+    expect(audioOutputLabel({ sink: 'USB Audio Device Analog Stereo', kind: 'usb' })).toBe('USB Audio Device Analog Stereo (USB)')
+  })
+
+  it('warns when the sound goes elsewhere', () => {
+    expect(audioOutputLabel({ sink: 'Built-in Audio Stereo', kind: 'jack' })).toBe('Built-in Audio Stereo (jack de la Raspberry) · no surt per l’adaptador USB: endolla’l (el jack fa soroll a les tires LED)')
+    expect(audioOutputLabel({ sink: 'HDMI', kind: 'hdmi' })).toContain('(HDMI)')
+  })
+
+  it('translates to Spanish', () => {
+    setLocale('es')
+    expect(audioOutputLabel({ sink: 'X', kind: 'other' })).toBe('X (otra salida) · no sale por el adaptador USB: enchúfalo (el jack mete ruido en las tiras LED)')
   })
 })

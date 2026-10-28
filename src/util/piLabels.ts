@@ -1,5 +1,5 @@
 import { t } from '../i18n'
-import { PI_ALERT_CODES, type PiAlert, type PiAlertCode, type PiClock, type PiMotor, type PiRehearsal, type PiSchedule, type PiScheduleDay, type PiSensor, type PiSkippedMotor } from '../types'
+import { PI_ALERT_CODES, type PiAlert, type PiAlertCode, type PiAudio, type PiClock, type PiMotor, type PiRehearsal, type PiSchedule, type PiScheduleDay, type PiSensor, type PiSkippedMotor } from '../types'
 import { formatMs } from './format'
 
 /** True for the alert codes the app has a label for. */
@@ -150,4 +150,10 @@ export function audioLabel(name: string): string {
 export function hexToRgb(hex: string): [number, number, number] {
   const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim())
   return m ? [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)] : [0, 0, 0]
+}
+
+/** Where the Pi's sound goes: «USB Audio Device (USB)», or the sink plus why it is wrong when it is not the USB adapter. */
+export function audioOutputLabel(audio: PiAudio): string {
+  const kind = t(`pi.audio.${audio.kind}` as const)
+  return audio.kind === 'usb' ? `${audio.sink} (${kind})` : `${audio.sink} (${kind}) · ${t('pi.audio.notUsb')}`
 }
