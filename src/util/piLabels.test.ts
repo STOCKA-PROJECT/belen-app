@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { setLocale } from '../i18n'
 import type { PiAlert, PiMotor, PiRehearsal, PiSchedule } from '../types'
-import { alertTitle, clockLabel, formatAgo, isKnownAlertCode, motorLastEndLabel, motorStateLabel, piTimeLabel, rehearsalLabel, scheduleNowLabel, scheduleWindowsLabel, sensorCanBeCut, sensorOnActiveLabel, sensorReadingLabel, skippedMotorLabel, timeAgo, unlockableAlerts } from './piLabels'
+import { alertTitle, audioLabel, clockLabel, formatAgo, hexToRgb, isKnownAlertCode, motorLastEndLabel, motorStateLabel, piTimeLabel, rehearsalLabel, scheduleNowLabel, scheduleWindowsLabel, sensorCanBeCut, sensorOnActiveLabel, sensorReadingLabel, skippedMotorLabel, timeAgo, unlockableAlerts } from './piLabels'
 
 const NOW = Date.parse('2026-10-21T14:00:00Z')
 const alert = (overrides: Partial<PiAlert> = {}): PiAlert => ({ code: 'motor_timeout', port: 'angel', message: '', at: '2026-10-21T13:59:00Z', ...overrides })
@@ -182,5 +182,32 @@ describe('schedule and clock labels', () => {
       expect(rehearsalLabel(rehearsal({ loop: true }))).toBe('«Pessebre 2026» · 5:10 → 5:40 · en bucle')
       expect(skippedMotorLabel({ target: 'Àngel', reason: 'cut', forward: 1, reverse: 0 })).toBe('Àngel no se mueve: un clip queda cortado por el tramo')
     })
+  })
+})
+
+describe('audioLabel', () => {
+  it.each([
+    ['12-riu.mp3', 'riu.mp3'],
+    ['412-àngel 2.ogg', 'àngel 2.ogg'],
+    ['nature.mp3', 'nature.mp3'],
+    ['2026-nadal.mp3', 'nadal.mp3'],
+    ['12-', '12-'],
+  ])('shows %s as %s', (name, label) => {
+    expect(audioLabel(name)).toBe(label)
+  })
+})
+
+describe('hexToRgb', () => {
+  it.each([
+    ['#ff8c32', [255, 140, 50]],
+    ['#FFFFFF', [255, 255, 255]],
+    ['000000', [0, 0, 0]],
+    [' #0a0B0c ', [10, 11, 12]],
+  ] as const)('reads %s', (hex, rgb) => {
+    expect(hexToRgb(hex)).toEqual(rgb)
+  })
+
+  it.each([['#fff'], ['red'], [''], ['#gg0000']])('falls back to black for %s', (hex) => {
+    expect(hexToRgb(hex)).toEqual([0, 0, 0])
   })
 })

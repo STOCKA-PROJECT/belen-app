@@ -56,6 +56,7 @@ src/
 │   └── errors.ts          NetworkError + helpers compartidos
 ├── stores/
 │   ├── auth.ts            sesión de Stocka (token en Preferences)
+│   ├── devices.ts         dispositivos registrados en Stocka, con dirección y PIN (índice en Preferences)
 │   ├── library.ts         paquetes descargados (ficheros en Directory.Data/bundles, índice en Preferences)
 │   ├── pi.ts              conexión, estado en vivo, PIN, mandos y envío con reanudación
 │   └── ui.ts              toasts y estado online/offline
@@ -88,8 +89,10 @@ JSON REST con `Authorization: Bearer <jwt>`; errores RFC 7807 (`application/prob
 | POST | `/auth/logout` | best effort |
 | GET | `/organizations` | `[{id, name, slug, currentUserRole}]` |
 | GET | `/organizations/{slug}/timelines` | `[{id, organizationId, name, createdAt, updatedAt}]` |
+| GET | `/organizations/{slug}/devices` | `[{id, deviceId, name, localUrl, pin, hasPin, online, lastShowName…}]`; 403 en una organización sin la función de hardware (se ignora) |
 | GET | `/organizations/{slug}/timelines/{id}/show` | paquete `stocka-show`; la app solo lee `meta.name` y `meta.hash` |
 | GET | `/organizations/{slug}/timelines/{id}/bundle` | `application/zip`, `Content-Disposition: attachment; filename="<slug>-<hash8>.belen.zip"` |
+| GET · POST | `/devices/{uuid}/logs/cursor` · `/devices/{uuid}/logs?file=&from=` (cuerpo: los bytes tal cual) | **llevar el registro de la Raspberry**: hasta dónde lo tiene Stocka y el trozo siguiente; 404 `devices.not_found` si Stocka aún no conoce esa Pi (el registro se queda en el móvil), 409 `devices.log_offset_mismatch` con `params.expected` |
 
 Un `422 timeline_shows.invalid` (escena con errores) trae `params.issues[]` y `params.warnings[]`
 (`{level, code, message, clipId, port}`); la app los muestra bajo la timeline.
@@ -118,7 +121,7 @@ Fuente de verdad: `rpi4-system/app/api/server.py`. Lecturas libres; escrituras c
 | Método | Ruta | Uso en la app |
 |---|---|---|
 | GET | `/api/info` | comprobar que la dirección responde; nombre del dispositivo, versión |
-| GET | `/api/status` · `/api/events` (SSE) | estado en vivo: `state, showName, mode, cycle, cycleMs, durationMs, hardware[{name,kind,off}], lastError…` y, desde el contrato v3, `sensors{name: {active, raw, onActive, blocked, address}}`, `motors{name: {direction, runningS, lastEnd, locked, blocked, limitForward, limitReverse}}` y `alerts[{code, port, message, at, …}]` (opcionales: una Raspberry anterior no los manda) |
+| GET | `/api/status` · `/api/events` (SSE) | estado en vivo: `state, showName, mode, cycle, cycleMs, durationMs, hardware[{name,kind,off,pieces}], lastError, test…` y, desde el contrato v3, `sensors{name: {active, raw, onActive, blocked, address}}`, `motors{name: {direction, runningS, lastEnd, locked, blocked, limitForward, limitReverse}}` y `alerts[{code, port, message, at, …}]` (opcionales: una Raspberry anterior no los manda) |
 | GET · DELETE | `/api/alerts` | alertas (`motor_timeout`, `sensor_stop_show`, `sensor_panic`; el `message` ya viene en catalán y se muestra tal cual; código desconocido → «Alerta (código)»); «Esborrar alertes» |
 | POST | `/api/motors/{name}/unlock` | «Desbloquejar» un motor bloqueado tras un `motor_timeout` (desde la alerta o desde su fila de puertos); `unlocked: false` = ya no lo estaba |
 | GET | `/api/bundles` · `/api/net` · `/api/logs?n=` | paquetes almacenados, red, registro |
@@ -128,6 +131,8 @@ Fuente de verdad: `rpi4-system/app/api/server.py`. Lecturas libres; escrituras c
 | POST | `/api/play` `{cycles?}` · `/api/stop` · `/api/panic` | mandos |
 | PUT | `/api/overrides` `{target, mode: "off"|"normal"}` · DELETE `/api/overrides` | **cortar / restablecer un puerto** (también motores y sensores); los cortados se muestran en rojo; un sensor `onActive: panic` no se puede cortar y la app deshabilita el botón |
 | POST | `/api/net/mode` `{mode}` · `/api/net/hotspot` · `/api/system/reboot` | acciones rápidas, siempre tras confirmación |
+| GET | `/api/logs/files` · `/api/logs/files/{name}?from=&max=` | ficheros diarios del registro y un trozo (hasta el último salto de línea; `X-Log-From/To/Size`) que la app lleva a Stocka |
+| POST | `/api/test/set` `{target, params}` · `/api/test/release` `{target?}` · GET `/api/assets` | **probar el hardware** desde la lista de puertos cuando no se ejecuta ningún show: relé «Encén/Apaga», LED y cabezal con color en vivo, motor «◀ Enrere / Endavant ▶» mientras se mantiene pulsado (la orden se repite cada 250 ms y la Pi lo para sola a los 0,5 s), audio con un sonido de la Pi. Lo encendido sigue encendido hasta apagarlo: la app renueva la orden cada 20 s (la Pi la deja caer al minuto) y la olvida si la Pi deja de listarla (pánico, play, corte) |
 
 Reintentos de los trozos: errores de transporte y 5xx con backoff 0,5 s → 1 s → 2 s (4 intentos);
 los 4xx (PIN, offset, 404) no se reintentan. El informe de importación (`ok, hash, name, errors[],
@@ -166,6 +171,20 @@ rechaza el paquete (422).
 - El PIN se guarda en Preferences (SharedPreferences, sin cifrar): protege un dispositivo de una
   red local y la etiqueta de la caja ya lo lleva impreso. Si se quiere, cambiarlo a un plugin de
   almacenamiento seguro es un único punto (`stores/pi.ts`).
+
+- **Dispositivos de Stocka** (`stores/devices.ts`). Con sesión e Internet (al abrir la app, al entrar, al volver la red)
+  la app baja los dispositivos de todas las organizaciones del usuario, con la dirección local y el PIN guardados en
+  Stocka (V30), y los guarda en Preferences (`devices.index`) para el belén sin Internet. En la pestaña «Pessebre»
+  salen arriba de la dirección: un toque pone dirección y PIN y conecta; al abrir la pestaña sin conexión, tras probar
+  la última dirección buena se prueban ellos. Un espectador no recibe el PIN y conserva el que tenga escrito. Al salir
+  de Stocka la lista se borra (lleva PINs).
+- **Registro de la Raspberry** (`stores/logRelay.ts`). En el belén la Pi no tiene Internet: al conectar con ella y
+  cada 5 minutos mientras sigue conectada, la app lee lo nuevo de sus ficheros de registro (trozos de 512 KiB, como
+  mucho 8 MB por vuelta, los últimos 30 días la primera vez) y lo guarda en `Directory.Data/log-pieces/` (índice en
+  Preferences, `logs.relay`, tope de 40 MB). En cuanto hay Internet y sesión (al abrir la app, al volver la red, al
+  entrar en Stocka o al conectar con la Pi) pide a Stocka hasta dónde tiene cada fichero (la Pi puede haber subido
+  parte ella misma) y le manda el resto. Stocka descarta lo que ya tenga; si falta algo antes de un trozo, la app lo
+  tira y vuelve a leer desde donde Stocka se queda. La sección «Sistema» dice cuánto espera y permite subirlo a mano.
 
 ## Tests
 

@@ -6,7 +6,9 @@ import { initI18n } from './i18n'
 import { router } from './router'
 import { getKv } from './storage'
 import { useAuthStore } from './stores/auth'
+import { useDevicesStore } from './stores/devices'
 import { useLibraryStore } from './stores/library'
+import { useLogRelayStore } from './stores/logRelay'
 import { usePiStore } from './stores/pi'
 import './styles/app.css'
 
@@ -14,7 +16,7 @@ async function bootstrap(): Promise<void> {
   const app = createApp(App)
   const pinia = createPinia()
   app.use(pinia)
-  await Promise.all([initI18n(getKv()), useAuthStore(pinia).init(), useLibraryStore(pinia).init(), usePiStore(pinia).init()])
+  await Promise.all([initI18n(getKv()), useAuthStore(pinia).init(), useLibraryStore(pinia).init(), usePiStore(pinia).init(), useLogRelayStore(pinia).init(), useDevicesStore(pinia).init()])
   app.use(router)
   await router.isReady()
   app.mount('#app')

@@ -8,6 +8,7 @@ import { getKv, KEYS } from '../storage'
 import { readJson, writeJson } from '../storage/kv'
 import type { StockaSession, StockaUser } from '../types'
 import { normalizeBaseUrl } from '../util/url'
+import { useDevicesStore } from './devices'
 
 interface SavedSession {
   baseUrl: string
@@ -87,6 +88,17 @@ export const useAuthStore = defineStore('auth', () => {
     mfaToken.value = null
     sessionExpired.value = false
     void persist()
+    void refreshDevices()
+  }
+
+  /** Loads the players of the user's organizations while there is a session; never throws. */
+  async function refreshDevices(): Promise<void> {
+    if (!isAuthenticated.value) return
+    try {
+      await useDevicesStore().refresh(client.value)
+    } catch (err) {
+      handleApiError(err)
+    }
   }
 
   /** First login step. Resolves to `'challenge'` when the account has 2FA and a code is needed. */
@@ -122,6 +134,7 @@ export const useAuthStore = defineStore('auth', () => {
     clearSession()
     sessionExpired.value = false
     await persist()
+    await useDevicesStore().clear()
   }
 
   function clearSession(): void {
@@ -156,6 +169,7 @@ export const useAuthStore = defineStore('auth', () => {
     init,
     setBaseUrl,
     login,
+    refreshDevices,
     submitTwoFactor,
     cancelTwoFactor,
     logout,

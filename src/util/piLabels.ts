@@ -140,3 +140,14 @@ export function skippedMotorLabel(motor: PiSkippedMotor): string {
     ? t('pi.rehearsal.cut', { motor: motor.target })
     : t('pi.rehearsal.unbalanced', { motor: motor.target, forward: motor.forward, reverse: motor.reverse })
 }
+
+/** An audio asset of the Pi without the attachment id Stocka puts in front («12-riu.mp3» → «riu.mp3»). */
+export function audioLabel(name: string): string {
+  return name.replace(/^\d+-(?=.)/, '')
+}
+
+/** `#rrggbb` of a colour input as the `[r, g, b]` the Pi takes; black for anything else. */
+export function hexToRgb(hex: string): [number, number, number] {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim())
+  return m ? [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)] : [0, 0, 0]
+}

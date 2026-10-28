@@ -19,6 +19,30 @@ export interface Timeline {
   updatedAt: string | null
 }
 
+/**
+ * A player registered in Stocka (`GET /organizations/{slug}/devices`), with where it answers on the
+ * local network and its PIN: what the app needs to connect without typing anything.
+ */
+export interface StockaDevice {
+  id: number
+  /** Uuid the player generated for itself; null until Stocka met it. */
+  deviceId: string | null
+  name: string
+  /** `http://belen.local:8080`; null when none is saved. */
+  localUrl: string | null
+  /** Six digits; null for a SPECTATOR or when none is saved. */
+  pin: string | null
+  hasPin: boolean
+  online: boolean
+  lastShowName: string | null
+}
+
+/** A device of Stocka together with the organization it belongs to, as the app keeps them. */
+export interface SavedDevice extends StockaDevice {
+  orgSlug: string
+  orgName: string
+}
+
 export interface StockaUser {
   id: number
   email: string
@@ -60,6 +84,17 @@ export interface PiHardware {
   name: string
   kind: string
   off: boolean
+  /** Stocka pieces driven by this port (`meta.pieces` of the show); absent on older players. */
+  pieces?: string[]
+}
+
+/** Parameters of a test order (`POST /api/test/set`), by kind: `{on}`, `{color}`, `{direction}`, `{audio_name}`, `{off}`… */
+export type PiTestParams = Record<string, unknown>
+
+/** Test mode of the player (`status.test`, `GET /api/test`): manual orders that expire on their own. */
+export interface PiTestStatus {
+  active: boolean
+  targets: Record<string, { kind: string; params: PiTestParams; expiresInS: number }>
 }
 
 /** What the player does when a sensor becomes active (`onActive` of a `sensor` port). */
@@ -173,6 +208,8 @@ export interface PiStatus {
   alerts?: PiAlert[]
   /** A rehearsal from the editor, while it lasts (`showHash` stays the active show). */
   rehearsal?: PiRehearsal | null
+  /** Manual test orders in force (state `TEST` while there is any). */
+  test?: PiTestStatus
 }
 
 export type PiScheduleDay = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'

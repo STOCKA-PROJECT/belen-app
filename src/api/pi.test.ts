@@ -553,3 +553,137 @@ describe('PiClient alerts and motors', () => {
     expect(status.alerts).toEqual([TIMEOUT_ALERT])
   })
 })
+
+/** Like {@link fakeAlertsPi}, keeping the JSON body of each call. */
+function fakeTestPi(routes: Record<string, (body: unknown) => Response>) {
+  const calls: Array<{ method: string; path: string; headers: Record<string, string>; body: unknown }> = []
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const method = (init?.method ?? 'GET').toUpperCase()
+    const path = new URL(String(input), 'http://pi').pathname
+    const headers = Object.fromEntries(Object.entries((init?.headers as Record<string, string>) ?? {}).map(([k, v]) => [k.toLowerCase(), v]))
+    const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as unknown) : null
+    calls.push({ method, path, headers, body })
+    const route = routes[`${method} ${path}`]
+    return route ? route(body) : jsonResponse(404, { error: 'not_found', message: path })
+  }
+  return { fetchImpl, calls }
+}
+
+describe('PiClient test mode', () => {
+  const RELAY_ON = { active: true, targets: { Sembra: { kind: 'relay', params: { on: true }, expiresInS: 60 } } }
+
+  it('sends a test order with target, params and the PIN, and returns the test status', async () => {
+    const pi = fakeTestPi({ 'POST /api/test/set': () => jsonResponse(200, RELAY_ON) })
+    const { c } = client(pi.fetchImpl)
+
+    const result = await c.testSet('Sembra', { on: true })
+
+    expect(result).toEqual(RELAY_ON)
+    expect(pi.calls[0]!.body).toEqual({ target: 'Sembra', params: { on: true } })
+    expect(pi.calls[0]!.headers.authorization).toBe('Pin 123456')
+    expect(pi.calls[0]!.headers['content-type']).toBe('application/json')
+  })
+
+  it('releases one port with its target and every port with an empty body', async () => {
+    const pi = fakeTestPi({ 'POST /api/test/release': () => jsonResponse(200, { active: false, targets: {} }) })
+    const { c } = client(pi.fetchImpl)
+
+    await c.testRelease('Sembra')
+    await c.testRelease()
+
+    expect(pi.calls.map((call) => call.body)).toEqual([{ target: 'Sembra' }, {}])
+    expect(pi.calls.every((call) => call.headers.authorization === 'Pin 123456')).toBe(true)
+  })
+
+  it.each([
+    ['a show is playing', 409, 'invalid_state'],
+    ['the port is cut', 409, 'target_off'],
+    ['a rehearsal runs', 409, 'rehearsal'],
+    ['the kind cannot be tested', 400, 'unsupported'],
+  ])('maps the refusal when %s', async (_label, status, code) => {
+    const pi = fakeTestPi({ 'POST /api/test/set': () => jsonResponse(status, { error: code, message: 'no' }) })
+    const { c } = client(pi.fetchImpl)
+
+    const err = (await c.testSet('Sembra', { on: true }).catch((e: unknown) => e)) as PiApiError
+
+    expect(err).toBeInstanceOf(PiApiError)
+    expect(err.code).toBe(code)
+    expect(err.needsPin).toBe(false)
+  })
+
+  it('refuses test orders without a PIN and never touches the network', async () => {
+    const pi = fakeTestPi({})
+    const { c } = client(pi.fetchImpl, { pin: null })
+
+    const set = (await c.testSet('Sembra', { on: true }).catch((e: unknown) => e)) as PiApiError
+    const release = (await c.testRelease().catch((e: unknown) => e)) as PiApiError
+
+    expect([set.code, release.code]).toEqual([PI_CODES.pinRequired, PI_CODES.pinRequired])
+    expect(pi.calls).toHaveLength(0)
+  })
+
+  it('lists the audio files of the Pi without the PIN and ignores what is not a name', async () => {
+    const pi = fakeTestPi({ 'GET /api/assets': () => jsonResponse(200, { audio: ['12-riu.mp3', 3, null, '13-angel.ogg'] }) })
+    const { c } = client(pi.fetchImpl)
+
+    expect(await c.audioFiles()).toEqual(['12-riu.mp3', '13-angel.ogg'])
+    expect(pi.calls[0]!.headers.authorization).toBeUndefined()
+  })
+
+  it.each([
+    ['no audio key', {}],
+    ['a non-array value', { audio: 'x' }],
+  ])('returns no audio files for %s', async (_label, body) => {
+    const pi = fakeTestPi({ 'GET /api/assets': () => jsonResponse(200, body) })
+    const { c } = client(pi.fetchImpl)
+
+    expect(await c.audioFiles()).toEqual([])
+  })
+})
+
+describe('PiClient log files', () => {
+  it('lists the log files with their size and ignores malformed entries', async () => {
+    const pi = fakeTestPi({ 'GET /api/logs/files': () => jsonResponse(200, { files: [{ name: 'system-2026-10-26.log', size: 42, modifiedAt: 'x' }, { name: 3 }, null] }) })
+    const { c } = client(pi.fetchImpl)
+
+    expect(await c.logFiles()).toEqual([{ name: 'system-2026-10-26.log', size: 42 }])
+  })
+
+  it('returns no files for an older player or a malformed answer', async () => {
+    const pi = fakeTestPi({ 'GET /api/logs/files': () => jsonResponse(200, {}) })
+    const { c } = client(pi.fetchImpl)
+
+    expect(await c.logFiles()).toEqual([])
+  })
+
+  it('reads a piece with its offsets from the X-Log headers', async () => {
+    const calls: string[] = []
+    const fetchImpl: typeof fetch = async (input) => {
+      calls.push(String(input))
+      return new Response('línia\n', { status: 200, headers: { 'Content-Type': 'text/plain', 'X-Log-From': '10', 'X-Log-To': '17', 'X-Log-Size': '99' } })
+    }
+    const { c } = client(fetchImpl)
+
+    const piece = await c.logPiece('system-2026-10-26.log', 10, 4096)
+
+    expect(new TextDecoder().decode(piece.bytes)).toBe('línia\n')
+    expect([piece.from, piece.to, piece.size]).toEqual([10, 17, 99])
+    expect(calls[0]).toBe('http://pi:8080/api/logs/files/system-2026-10-26.log?from=10&max=4096')
+  })
+
+  it('falls back to the length of the body without headers', async () => {
+    const fetchImpl: typeof fetch = async () => new Response('abc', { status: 200 })
+    const { c } = client(fetchImpl)
+
+    const piece = await c.logPiece('a.log', 5, 100)
+
+    expect([piece.from, piece.to, piece.size]).toEqual([5, 8, 8])
+  })
+
+  it('maps a missing file to a PiApiError', async () => {
+    const pi = fakeTestPi({})
+    const { c } = client(pi.fetchImpl)
+
+    await expect(c.logPiece('missing.log', 0, 10)).rejects.toBeInstanceOf(PiApiError)
+  })
+})

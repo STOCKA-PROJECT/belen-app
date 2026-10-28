@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { useI18n } from './i18n'
 import { useAuthStore } from './stores/auth'
+import { useLogRelayStore } from './stores/logRelay'
 import { useUiStore } from './stores/ui'
 
 const route = useRoute()
@@ -14,9 +15,28 @@ const { t, otherLocale, toggleLocale } = useI18n()
 const tab = computed(() => (route.meta.tab as string | undefined) ?? 'library')
 const stockaTarget = computed(() => (auth.isAuthenticated ? '/orgs' : '/login'))
 
-const onOnline = () => ui.setOnline(true)
+const logRelay = useLogRelayStore()
+
+/**
+ * As soon as there is Internet and a Stocka session: sends the players' log the phone carries and
+ * refreshes the players' addresses and PINs for the next visit to the belén.
+ */
+function flushLog(): void {
+  if (!auth.isAuthenticated) return
+  void logRelay.flush(auth.client)
+  void auth.refreshDevices()
+}
+
+const onOnline = () => {
+  ui.setOnline(true)
+  flushLog()
+}
+watch(() => auth.isAuthenticated, (authenticated) => {
+  if (authenticated) flushLog()
+})
 const onOffline = () => ui.setOnline(false)
 onMounted(() => {
+  flushLog()
   window.addEventListener('online', onOnline)
   window.addEventListener('offline', onOffline)
 })

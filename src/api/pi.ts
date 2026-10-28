@@ -1,5 +1,5 @@
 import type { BundleSource } from '../storage/bundleFiles'
-import type { ImportReport, OverrideMode, PiAlert, PiBundles, PiClock, PiInfo, PiMotor, PiNet, PiStatus, PiUpload } from '../types'
+import type { ImportReport, OverrideMode, PiAlert, PiBundles, PiClock, PiInfo, PiMotor, PiNet, PiStatus, PiTestParams, PiTestStatus, PiUpload } from '../types'
 import { joinUrl } from '../util/url'
 import { isRecord, NetworkError, readJsonBody, safeFetch } from './errors'
 
@@ -46,6 +46,20 @@ export class PiApiError extends Error {
     const message = typeof b.message === 'string' ? b.message : fallback
     return new PiApiError(status, code, message, b)
   }
+}
+
+/** A daily log file of the player (`GET /api/logs/files`). */
+export interface PiLogFile {
+  name: string
+  size: number
+}
+
+/** Bytes `[from, to)` of a log file and the file size when they were read. */
+export interface PiLogPiece {
+  bytes: Uint8Array
+  from: number
+  to: number
+  size: number
 }
 
 /** The subset of `EventSource` the status subscription uses; injectable for tests. */
@@ -157,6 +171,37 @@ export class PiClient {
     return this.json('/api/net')
   }
 
+  /** `GET /api/assets`: the audio files stored on the Pi (what a test can play). */
+  async audioFiles(): Promise<string[]> {
+    const data = await this.json<{ audio?: unknown }>('/api/assets')
+    return Array.isArray(data?.audio) ? data.audio.filter((n): n is string => typeof n === 'string') : []
+  }
+
+  /** `GET /api/logs/files`: the player's daily log files with their current size (empty on older players). */
+  async logFiles(): Promise<PiLogFile[]> {
+    const data = await this.json<{ files?: unknown }>('/api/logs/files')
+    if (!Array.isArray(data?.files)) return []
+    return data.files
+      .filter(isRecord)
+      .filter((f) => typeof f.name === 'string' && typeof f.size === 'number')
+      .map((f) => ({ name: f.name as string, size: f.size as number }))
+  }
+
+  /**
+   * `GET /api/logs/files/{name}?from=&max=`: the bytes of a log file from `from` up to its last full
+   * line within `max`; `to` is where the next read starts (no bytes when nothing new).
+   */
+  async logPiece(name: string, from: number, max: number): Promise<PiLogPiece> {
+    const res = await this.fetchRaw(`/api/logs/files/${encodeURIComponent(name)}?from=${from}&max=${max}`, { headers: { Accept: 'text/plain' } })
+    if (!res.ok) throw PiApiError.fromBody(res.status, await readJsonBody(res), res.statusText)
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    const header = (key: string, fallback: number) => {
+      const value = Number(res.headers.get(key))
+      return Number.isFinite(value) && res.headers.get(key) !== null ? value : fallback
+    }
+    return { bytes, from: header('X-Log-From', from), to: header('X-Log-To', from + bytes.byteLength), size: header('X-Log-Size', from + bytes.byteLength) }
+  }
+
   /** `GET /api/alerts`: the latest alerts of the player, oldest first (empty when none). */
   async getAlerts(): Promise<PiAlert[]> {
     const data = await this.json<{ alerts?: unknown }>('/api/alerts')
@@ -221,6 +266,20 @@ export class PiClient {
    */
   unlockMotor(name: string): Promise<{ motor: string; unlocked: boolean; motors: Record<string, PiMotor> }> {
     return this.json(`/api/motors/${encodeURIComponent(name)}/unlock`, { method: 'POST', pin: true })
+  }
+
+  /**
+   * `POST /api/test/set`: a manual order on one port, only while no show runs. It expires on its own
+   * (a minute; half a second for a motor), so it has to be renewed: repeating the same params only
+   * extends it on the Pi, it does not start the action again.
+   */
+  testSet(target: string, params: PiTestParams): Promise<PiTestStatus> {
+    return this.json('/api/test/set', { method: 'POST', body: JSON.stringify({ target, params }), pin: true })
+  }
+
+  /** `POST /api/test/release`: leaves one port (or every port, without target) safe and ends the test mode when none is left. */
+  testRelease(target?: string): Promise<PiTestStatus> {
+    return this.json('/api/test/release', { method: 'POST', body: JSON.stringify(target ? { target } : {}), pin: true })
   }
 
   setNetMode(mode: 'ap' | 'auto'): Promise<PiNet> {

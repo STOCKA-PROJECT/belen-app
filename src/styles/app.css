@@ -154,9 +154,24 @@ button, input, select { font: inherit; color: inherit; }
 @media (min-width: 600px) { .modal-backdrop { align-items: center; } }
 
 .switch { display: inline-flex; align-items: center; gap: 8px; }
-.port-list > li { padding: 12px; }
+.port-list > li { padding: 12px; flex-direction: column; align-items: stretch; gap: 10px; }
+.port-list > li.is-testing { background: var(--c-warn-soft); }
+.port-list .port-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .port-list .port-name { font-weight: 600; font-size: 15px; }
 .port-list .is-off .port-name { color: var(--c-danger); }
+.port-list .port-pieces { font-size: 12px; line-height: 16px; color: var(--c-ink); overflow-wrap: anywhere; }
+.btn-cut { color: var(--c-danger); }
+.btn-cut:hover:not(:disabled) { background: var(--c-danger-soft); }
+.port-test { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.port-test .meta { flex-basis: 100%; }
+.field-sm { height: 30px; padding: 0 8px; font-size: 13px; }
+.color-swatch { width: 44px; height: 30px; flex: none; padding: 2px; border-radius: 6px; border: 1px solid var(--c-line-control); background: var(--c-field); cursor: pointer; }
+.color-swatch:focus-visible, .btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.btn-toggle .toggle-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c-line-strong); }
+.btn-toggle.is-on { border-color: var(--c-ok); background: var(--c-ok-soft); color: var(--c-ok); }
+.btn-toggle.is-on .toggle-dot { background: var(--c-ok); box-shadow: 0 0 0 3px var(--c-ok-soft); }
+.btn-hold { flex: 1; min-width: 0; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.btn-hold.is-held { border-color: var(--c-accent); background: var(--c-accent); color: var(--c-on-accent); }
 
 .details > summary { cursor: pointer; list-style: none; }
 .details > summary::-webkit-details-marker { display: none; }

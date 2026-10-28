@@ -185,3 +185,96 @@ describe('StockaClient.downloadBundle', () => {
     expect(sink.chunks).toHaveLength(0)
   })
 })
+
+describe('StockaClient player log', () => {
+  const UUID = '6f1c2a9e-4b7d-4e21-9c3a-0d5e8f7b1a42'
+  const client = (fetchImpl: typeof fetch) => new StockaClient({ baseUrl: 'https://stocka.test/', getToken: () => 'jwt', fetchImpl })
+
+  it('reads the cursor of a player by its uuid with the session', async () => {
+    const { calls, fetchImpl } = recording(() => json(200, { files: { 'system-2026-10-26.log': 120, bad: 'x' }, since: '2026-04-29' }))
+
+    const cursor = await client(fetchImpl).logCursor(UUID)
+
+    expect(cursor).toEqual({ files: { 'system-2026-10-26.log': 120 }, since: '2026-04-29' })
+    expect(calls[0]!.url).toBe(`https://stocka.test/devices/${UUID}/logs/cursor`)
+    expect((calls[0]!.init?.headers as Record<string, string>).Authorization).toBe('Bearer jwt')
+  })
+
+  it('tolerates a cursor without files or since', async () => {
+    const { fetchImpl } = recording(() => json(200, {}))
+
+    expect(await client(fetchImpl).logCursor(UUID)).toEqual({ files: {}, since: null })
+  })
+
+  it('maps an unknown player to 404 devices.not_found', async () => {
+    const { fetchImpl } = recording(() => problem(404, { code: 'devices.not_found', detail: 'Dispositiu no trobat.' }))
+
+    const err = (await client(fetchImpl).logCursor(UUID).catch((e: unknown) => e)) as StockaApiError
+
+    expect(err).toBeInstanceOf(StockaApiError)
+    expect([err.status, err.code]).toEqual([404, 'devices.not_found'])
+  })
+
+  it('uploads the raw bytes of a piece with the file and offset in the query', async () => {
+    const { calls, fetchImpl } = recording(() => json(200, { file: 'system-2026-10-26.log', end: 130, stored: 10 }))
+    const bytes = new TextEncoder().encode('línia nova\n')
+
+    const result = await client(fetchImpl).uploadLog(UUID, 'system-2026-10-26.log', 120, bytes)
+
+    expect(result).toEqual({ file: 'system-2026-10-26.log', end: 130, stored: 10 })
+    expect(calls[0]!.url).toBe(`https://stocka.test/devices/${UUID}/logs?file=system-2026-10-26.log&from=120`)
+    expect(calls[0]!.init?.method).toBe('POST')
+    expect((calls[0]!.init?.headers as Record<string, string>)['Content-Type']).toBe('text/plain; charset=utf-8')
+    const sent = new Uint8Array(await (calls[0]!.init?.body as Blob).arrayBuffer())
+    expect(sent).toEqual(bytes)
+  })
+
+  it('keeps the expected offset of a 409 in the error params', async () => {
+    const { fetchImpl } = recording(() => problem(409, { code: 'devices.log_offset_mismatch', params: { expected: 80 } }))
+
+    const err = (await client(fetchImpl).uploadLog(UUID, 'a.log', 120, new Uint8Array(3)).catch((e: unknown) => e)) as StockaApiError
+
+    expect(err.status).toBe(409)
+    expect(err.params.expected).toBe(80)
+  })
+
+  it('reports an unreachable backend as a NetworkError', async () => {
+    const fetchImpl: typeof fetch = async () => {
+      throw new TypeError('Failed to fetch')
+    }
+
+    await expect(client(fetchImpl).logCursor(UUID)).rejects.toBeInstanceOf(NetworkError)
+  })
+})
+
+describe('StockaClient.listDevices', () => {
+  const client = (fetchImpl: typeof fetch) => new StockaClient({ baseUrl: 'https://stocka.test', getToken: () => 'jwt', fetchImpl })
+
+  it('maps the devices with their address and PIN, tolerating missing fields', async () => {
+    const { calls, fetchImpl } = recording(() => json(200, [
+      { id: 1, deviceId: 'uuid-1', name: 'Pessebre', localUrl: 'http://belen.local:8080', pin: '482913', hasPin: true, online: true, lastShowName: 'Nadal' },
+      { id: 2, name: 'Sense res', localUrl: null, pin: null, hasPin: false, online: false },
+      'nope',
+    ]))
+
+    const devices = await client(fetchImpl).listDevices('parròquia')
+
+    expect(devices).toEqual([
+      { id: 1, deviceId: 'uuid-1', name: 'Pessebre', localUrl: 'http://belen.local:8080', pin: '482913', hasPin: true, online: true, lastShowName: 'Nadal' },
+      { id: 2, deviceId: null, name: 'Sense res', localUrl: null, pin: null, hasPin: false, online: false, lastShowName: null },
+    ])
+    expect(calls[0]!.url).toBe('https://stocka.test/organizations/parr%C3%B2quia/devices')
+    expect((calls[0]!.init?.headers as Record<string, string>).Authorization).toBe('Bearer jwt')
+  })
+
+  it('treats a non-array body as no devices', async () => {
+    const { fetchImpl } = recording(() => json(200, {}))
+    expect(await client(fetchImpl).listDevices('x')).toEqual([])
+  })
+
+  it('maps the 403 of an organization without the hardware feature', async () => {
+    const { fetchImpl } = recording(() => problem(403, { code: 'auth.forbidden', detail: 'No tens permís.' }))
+    const err = (await client(fetchImpl).listDevices('x').catch((e: unknown) => e)) as StockaApiError
+    expect(err.status).toBe(403)
+  })
+})

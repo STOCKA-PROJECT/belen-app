@@ -1,12 +1,14 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 
 import { setLocale } from '../i18n'
 import { setStorage } from '../storage'
 import { createMemoryBundleFiles } from '../storage/bundleFiles'
 import { createMemoryKv } from '../storage/kv'
-import type { PiAlert, PiHardware, PiMotor, PiStatus } from '../types'
-import { usePiStore } from './pi'
+import type { PiAlert, PiHardware, PiMotor, PiStatus, PiTestStatus, SavedDevice } from '../types'
+import { useDevicesStore } from './devices'
+import { MOTOR_REFRESH_MS, TEST_GRACE_MS, TEST_LIVE_MS, TEST_RENEW_MS, usePiStore } from './pi'
 import { useUiStore } from './ui'
 
 const PIN = '123456'
@@ -397,5 +399,484 @@ describe('pi store: clock sync on connect', () => {
     expect(posts).toHaveLength(1)
     expect(store.status?.clock?.reliable).toBe(false)
     store.disconnect()
+  })
+})
+
+describe('pi store: connecting to a device saved in Stocka', () => {
+  beforeEach(() => {
+    setStorage({ kv: createMemoryKv(), files: createMemoryBundleFiles() })
+    setActivePinia(createPinia())
+    setLocale('ca')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const saved = (overrides: Partial<SavedDevice> = {}): SavedDevice => ({
+    id: 7,
+    deviceId: 'uuid-7',
+    name: 'Pessebre parròquia',
+    localUrl: 'http://belen.local:8080',
+    pin: '482913',
+    hasPin: true,
+    online: false,
+    lastShowName: null,
+    orgSlug: 'parroquia',
+    orgName: 'Parròquia',
+    ...overrides,
+  })
+
+  /** A Pi answering the reads `connect` makes, at any address; records the hosts asked. */
+  function installAnyPi() {
+    const hosts: string[] = []
+    const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://pi')
+      hosts.push(url.host)
+      const path = url.pathname.replace(/^\/__pi/, '')
+      if (path === '/api/info') return json(200, { device: { name: 'belen', deviceId: 'uuid-7' }, version: 't', uptimeS: 1, freeBytes: 1 })
+      if (path === '/api/status') return json(200, baseStatus())
+      if (path === '/api/bundles') return json(200, { active: null, previous: null, shows: [] })
+      if (path === '/api/net') return json(200, { enabled: false })
+      if (path === '/api/assets') return json(200, { audio: [] })
+      return json(404, { error: 'not_found', message: path })
+    }))
+    return hosts
+  }
+
+  it('takes the address and the PIN from the device and connects', async () => {
+    const hosts = installAnyPi()
+    const store = usePiStore()
+
+    expect(await store.connectTo(saved())).toBe(true)
+
+    expect(store.baseUrl).toBe('http://belen.local:8080')
+    expect(store.pin).toBe('482913')
+    expect(store.connected).toBe(true)
+    expect(hosts[0]).toBe('belen.local:8080')
+    store.disconnect()
+  })
+
+  it('keeps the PIN already on the phone when Stocka does not give one (a SPECTATOR)', async () => {
+    installAnyPi()
+    const store = usePiStore()
+    store.setPin('111111', 'Joan')
+
+    expect(await store.connectTo(saved({ pin: null, hasPin: false, localUrl: 'http://10.42.0.1:8080' }))).toBe(true)
+
+    expect(store.pin).toBe('111111')
+    expect(store.baseUrl).toBe('http://10.42.0.1:8080')
+    store.disconnect()
+  })
+
+  it('refuses a device without an address and touches nothing', async () => {
+    const hosts = installAnyPi()
+    const store = usePiStore()
+    const before = store.baseUrl
+
+    expect(await store.connectTo(saved({ localUrl: null }))).toBe(false)
+
+    expect(store.baseUrl).toBe(before)
+    expect(hosts).toEqual([])
+  })
+
+  it('takes the PIN of the matching Stocka device when the Pi is reached by another address', async () => {
+    installAnyPi()
+    const devices = useDevicesStore()
+    devices.devices = [saved({ localUrl: 'http://belen.local:8080' })]
+    const store = usePiStore()
+
+    expect(await store.connect('http://10.42.0.1:8080')).toBe(true) // the Pi reports uuid-7
+
+    expect(store.pin).toBe('482913')
+    store.disconnect()
+  })
+
+  it('never replaces a PIN already on the phone with the one of Stocka', async () => {
+    installAnyPi()
+    useDevicesStore().devices = [saved()]
+    const store = usePiStore()
+    store.setPin('111111', 'Joan')
+
+    await store.connect('http://belen.local:8080')
+
+    expect(store.pin).toBe('111111')
+    store.disconnect()
+  })
+
+  it('remembers the address and PIN of the device for the next start', async () => {
+    const kv = createMemoryKv()
+    setStorage({ kv, files: createMemoryBundleFiles() })
+    installAnyPi()
+    await usePiStore().connectTo(saved())
+
+    setActivePinia(createPinia())
+    const store = usePiStore()
+    await store.init()
+
+    expect(store.baseUrl).toBe('http://belen.local:8080')
+    expect(store.pin).toBe('482913')
+  })
+})
+
+describe('pi store: hardware test', () => {
+  const SHOW = 'sha256:' + 'a'.repeat(64)
+  const HARDWARE: PiHardware[] = [
+    { name: 'Sembra', kind: 'relay', off: false, pieces: ['Blat'] },
+    { name: 'Casa', kind: 'led_segment', off: false },
+    { name: 'Angel', kind: 'motor', off: false },
+    { name: 'Audio', kind: 'audio', off: false },
+  ]
+
+  interface TestCall {
+    method: string
+    path: string
+    body: Record<string, unknown> | null
+    authorization: string | undefined
+  }
+
+  /** A stateful fake of the test endpoints: orders by target, state TEST while there is any. */
+  function installTestPi(options: { refuse?: Record<string, { status: number; error: string }> } = {}) {
+    const orders: Record<string, Record<string, unknown>> = {}
+    let state: PiStatus['state'] = 'IDLE'
+    const calls: TestCall[] = []
+    const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+    const test = (): PiTestStatus => ({
+      active: state === 'TEST',
+      targets: Object.fromEntries(Object.entries(orders).map(([target, params]) => [target, { kind: 'x', params, expiresInS: 60 }])),
+    })
+    const statusNow = () => baseStatus({ state, showHash: SHOW, hardware: HARDWARE, test: test() })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase()
+      const path = new URL(String(input), 'http://pi').pathname.replace(/^\/__pi/, '')
+      const headers = (init?.headers as Record<string, string>) ?? {}
+      const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : null
+      calls.push({ method, path, body, authorization: headers.Authorization })
+      if (method === 'GET' && path === '/api/status') return json(200, statusNow())
+      if (headers.Authorization !== `Pin ${PIN}`) return json(401, { error: headers.Authorization ? 'pin_invalid' : 'pin_required', message: 'PIN' })
+      if (method === 'POST' && path === '/api/test/set') {
+        const target = String(body?.target)
+        const refused = options.refuse?.[target]
+        if (refused) return json(refused.status, { error: refused.error, message: refused.error })
+        orders[target] = body?.params as Record<string, unknown>
+        state = 'TEST'
+        return json(200, test())
+      }
+      if (method === 'POST' && path === '/api/test/release') {
+        if (typeof body?.target === 'string') delete orders[body.target]
+        else for (const target of Object.keys(orders)) delete orders[target]
+        if (Object.keys(orders).length === 0 && state === 'TEST') state = 'IDLE'
+        return json(200, test())
+      }
+      if (method === 'POST' && path === '/api/play') {
+        if (state === 'TEST') return json(409, { error: 'test_mode', message: 'Sal del modo prueba' })
+        state = 'PLAYING'
+        return json(200, statusNow())
+      }
+      if (method === 'PUT' && path === '/api/overrides') {
+        delete orders[String(body?.target)]
+        return json(200, { off: [body?.target], hardware: HARDWARE })
+      }
+      return json(404, { error: 'not_found', message: path })
+    }))
+    return {
+      calls,
+      orders,
+      /** What the Pi would push in its next status snapshot. */
+      statusNow,
+      setState: (next: PiStatus['state']) => void (state = next),
+      sets: () => calls.filter((c) => c.path === '/api/test/set'),
+      releases: () => calls.filter((c) => c.path === '/api/test/release'),
+    }
+  }
+
+  function connectedStore(status: Partial<PiStatus> = {}, pin: string | null = PIN) {
+    const store = usePiStore()
+    if (pin) store.setPin(pin, 'Joan')
+    store.connected = true
+    store.status = baseStatus({ showHash: SHOW, hardware: HARDWARE, ...status })
+    return store
+  }
+
+  beforeEach(() => {
+    setStorage({ kv: createMemoryKv(), files: createMemoryBundleFiles() })
+    setActivePinia(createPinia())
+    setLocale('ca')
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    usePiStore().disconnect()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  describe('canTest', () => {
+    it.each([['IDLE'], ['SAFE'], ['TEST']] as const)('allows tests in %s with a show loaded', (state) => {
+      installTestPi()
+      expect(connectedStore({ state }).canTest).toBe(true)
+    })
+
+    it.each([
+      ['a show is playing', { state: 'PLAYING' as const }],
+      ['no show is loaded', { showHash: null }],
+      ['a rehearsal from the editor runs', { rehearsal: { fromMs: 0, toMs: 1, loop: false, startedAt: '', showHash: null, showName: null, showTimelineId: null, skippedMotors: [] } }],
+      ['the player is booting', { state: 'BOOT' as const }],
+    ])('refuses tests when %s', (_label, status) => {
+      installTestPi()
+      expect(connectedStore(status).canTest).toBe(false)
+    })
+
+    it('refuses tests while disconnected', () => {
+      installTestPi()
+      const store = connectedStore()
+      store.connected = false
+      expect(store.canTest).toBe(false)
+    })
+  })
+
+  describe('switching a port on and off', () => {
+    it('sends the order with the PIN and shows the port as tested at once', async () => {
+      const pi = installTestPi()
+      const store = connectedStore()
+
+      expect(await store.testOn('Sembra', { on: true })).toBe(true)
+
+      expect(pi.sets()).toEqual([{ method: 'POST', path: '/api/test/set', body: { target: 'Sembra', params: { on: true } }, authorization: `Pin ${PIN}` }])
+      expect(store.status?.state).toBe('TEST')
+      expect(store.testTargets.has('Sembra')).toBe(true)
+    })
+
+    it('switches it off with a release of that port and goes back to idle', async () => {
+      const pi = installTestPi()
+      const store = connectedStore()
+      await store.testOn('Sembra', { on: true })
+
+      await store.testOff('Sembra')
+
+      expect(pi.releases().at(-1)!.body).toEqual({ target: 'Sembra' })
+      expect(store.status?.state).toBe('IDLE')
+      expect(store.testTargets.has('Sembra')).toBe(false)
+      expect(store.testOrders).toEqual({})
+    })
+
+    it('switches every test off at once', async () => {
+      const pi = installTestPi()
+      const store = connectedStore()
+      await store.testOn('Sembra', { on: true })
+      await store.testOn('Casa', { color: [255, 0, 0] })
+
+      await store.testOffAll()
+
+      expect(pi.releases().at(-1)!.body).toEqual({})
+      expect(store.testTargets.size).toBe(0)
+      expect(store.status?.state).toBe('IDLE')
+    })
+
+    it('asks for the PIN first and switches the port on once it is entered', async () => {
+      const pi = installTestPi()
+      const store = connectedStore({}, null)
+
+      expect(await store.testOn('Sembra', { on: true })).toBe(false)
+      expect(store.pinDialogOpen).toBe(true)
+      expect(pi.sets()).toHaveLength(0)
+
+      await store.submitPin(PIN, 'Joan')
+
+      expect(pi.sets()).toHaveLength(1)
+      expect(store.testTargets.has('Sembra')).toBe(true)
+    })
+
+    it('shows the refusal and keeps the port off when the Pi says no', async () => {
+      installTestPi({ refuse: { Sembra: { status: 409, error: 'target_off' } } })
+      const store = connectedStore()
+
+      expect(await store.testOn('Sembra', { on: true })).toBe(false)
+
+      expect(useUiStore().toasts.at(-1)?.error).toBe(true)
+      expect(store.testTargets.has('Sembra')).toBe(false)
+    })
+  })
+
+  describe('keeping a port on until it is switched off', () => {
+    it('renews the same order before the Pi lets it expire', async () => {
+      const pi = installTestPi()
+      const store = connectedStore()
+      await store.testOn('Sembra', { on: true })
+      store.status = pi.statusNow()
+
+      await vi.advanceTimersByTimeAsync(TEST_RENEW_MS)
+
+      expect(pi.sets().map((c) => c.body)).toEqual([{ target: 'Sembra', params: { on: true } }, { target: 'Sembra', params: { on: true } }])
+    })
+
+    it('stops renewing once the port is switched off', async () => {
+      const pi = installTestPi()
+      const store = connectedStore()
+      await store.testOn('Sembra', { on: true })
+      await store.testOff('Sembra')
+
+      await vi.advanceTimersByTimeAsync(TEST_RENEW_MS * 3)
+
+      expect(pi.sets()).toHaveLength(1)
+    })
+
+    it('forgets an order the Pi dropped (panic, expiry) instead of switching it on again', async () => {
+      const pi = installTestPi()
+      const store = connectedStore()
+      await store.testOn('Sembra', { on: true })
+      delete pi.orders.Sembra
+      await vi.advanceTimersByTimeAsync(TEST_GRACE_MS + 1)
+
+      store.status = baseStatus({ state: 'SAFE', showHash: SHOW, hardware: HARDWARE, test: { active: false, targets: {} } })
+      await nextTick()
+
+      expect(store.testOrders).toEqual({})
+      await vi.advanceTimersByTimeAsync(TEST_RENEW_MS)
+      expect(pi.sets()).toHaveLength(1)
+    })
+
+    it('keeps a just-sent order the status does not list yet', async () => {
+      installTestPi()
+      const store = connectedStore()
+      await store.testOn('Sembra', { on: true })
+
+      store.status = baseStatus({ state: 'TEST', showHash: SHOW, hardware: HARDWARE, test: { active: true, targets: {} } })
+      await nextTick()
+
+      expect(store.testOrders).toHaveProperty('Sembra')
+    })
+
+    it('forgets every order when a show starts', async () => {
+      installTestPi()
+      const store = connectedStore()
+      await store.testOn('Sembra', { on: true })
+
+      store.status = baseStatus({ state: 'PLAYING', showHash: SHOW, hardware: HARDWARE })
+      await nextTick()
+
+      expect(store.testOrders).toEqual({})
+    })
+
+    it('forgets the order of a port that gets cut', async () => {
+      installTestPi()
+      const store = connectedStore()
+      await store.testOn('Sembra', { on: true })
+
+      await store.toggleOverride(HARDWARE[0]!)
+
+      expect(store.testOrders).not.toHaveProperty('Sembra')
+    })
+
+    it('forgets everything on disconnect', async () => {
+      const pi = installTestPi()
+      const store = connectedStore()
+      await store.testOn('Sembra', { on: true })
+
+      store.disconnect()
+      await vi.advanceTimersByTimeAsync(TEST_RENEW_MS * 2)
+
+      expect(store.testOrders).toEqual({})
+      expect(pi.sets()).toHaveLength(1)
+    })
+  })
+
+  describe('live colour', () => {
+    it('sends the first colour at once and only the latest one per interval', async () => {
+      const pi = installTestPi()
+      const store = connectedStore()
+
+      store.testLive('Casa', { color: [1, 0, 0] })
+      store.testLive('Casa', { color: [2, 0, 0] })
+      store.testLive('Casa', { color: [3, 0, 0] })
+      await vi.advanceTimersByTimeAsync(TEST_LIVE_MS)
+      await vi.advanceTimersByTimeAsync(TEST_LIVE_MS)
+
+      expect(pi.sets().map((c) => c.body?.params)).toEqual([{ color: [1, 0, 0] }, { color: [3, 0, 0] }])
+      expect(store.busy).toBe(false)
+    })
+  })
+
+  describe('motors', () => {
+    it('repeats the direction while the button is held and releases the motor when it is let go', async () => {
+      const pi = installTestPi()
+      const store = connectedStore()
+
+      store.motorHold('Angel', 'forward')
+      await vi.advanceTimersByTimeAsync(MOTOR_REFRESH_MS * 3)
+
+      expect(pi.sets().length).toBe(4)
+      expect(pi.sets().every((c) => (c.body?.params as { direction: string }).direction === 'forward')).toBe(true)
+      expect(store.heldMotor).toEqual({ name: 'Angel', direction: 'forward' })
+
+      store.motorRelease()
+      await vi.advanceTimersByTimeAsync(MOTOR_REFRESH_MS * 4)
+
+      expect(store.heldMotor).toBeNull()
+      expect(pi.sets().length).toBe(4)
+      expect(pi.releases().at(-1)!.body).toEqual({ target: 'Angel' })
+    })
+
+    it('holding the other direction releases the first one', async () => {
+      const pi = installTestPi()
+      const store = connectedStore()
+      store.motorHold('Angel', 'forward')
+      await vi.advanceTimersByTimeAsync(0)
+
+      store.motorHold('Angel', 'reverse')
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(pi.releases()).toHaveLength(1)
+      expect(pi.sets().at(-1)!.body?.params).toEqual({ direction: 'reverse' })
+      expect(store.heldMotor?.direction).toBe('reverse')
+    })
+
+    it('stops repeating when the Pi refuses the motor', async () => {
+      const pi = installTestPi({ refuse: { Angel: { status: 409, error: 'target_off' } } })
+      const store = connectedStore()
+
+      store.motorHold('Angel', 'forward')
+      await vi.advanceTimersByTimeAsync(MOTOR_REFRESH_MS * 4)
+
+      expect(pi.sets()).toHaveLength(1)
+      expect(store.heldMotor).toBeNull()
+    })
+
+    it('without a PIN asks for it and never replays the motor order afterwards', async () => {
+      const pi = installTestPi()
+      const store = connectedStore({}, null)
+
+      store.motorHold('Angel', 'forward')
+      expect(store.pinDialogOpen).toBe(true)
+      await store.submitPin(PIN, 'Joan')
+      await vi.advanceTimersByTimeAsync(MOTOR_REFRESH_MS * 2)
+
+      expect(pi.sets()).toHaveLength(0)
+      expect(store.heldMotor).toBeNull()
+    })
+
+    it('letting go with nothing held does nothing', () => {
+      const pi = installTestPi()
+      const store = connectedStore()
+
+      store.motorRelease()
+
+      expect(pi.calls).toHaveLength(0)
+    })
+  })
+
+  describe('play', () => {
+    it('switches the tests off before starting the show', async () => {
+      const pi = installTestPi()
+      const store = connectedStore()
+      await store.testOn('Sembra', { on: true })
+
+      await store.play()
+
+      expect(pi.releases().at(-1)!.body).toEqual({})
+      expect(store.status?.state).toBe('PLAYING')
+      expect(store.testOrders).toEqual({})
+    })
   })
 })

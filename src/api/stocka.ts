@@ -1,5 +1,5 @@
 import type { ByteSink } from '../storage/bundleFiles'
-import type { LoginResult, Organization, ShowIssue, ShowMeta, StockaSession, Timeline } from '../types'
+import type { LoginResult, Organization, ShowIssue, ShowMeta, StockaDevice, StockaSession, Timeline } from '../types'
 import { parseContentDispositionFilename } from '../util/bundleName'
 import { joinUrl } from '../util/url'
 import { isRecord, NetworkError, readJsonBody, safeFetch } from './errors'
@@ -76,6 +76,19 @@ export async function stockaErrorFrom(res: Response): Promise<StockaApiError> {
 
 /** `RequestInit` with plain-object headers plus the client's own flags. */
 type ReqInit = Omit<RequestInit, 'headers'> & { auth?: boolean; headers?: Record<string, string> }
+
+/** How far each log file of a player is stored in Stocka, and the oldest day it keeps. */
+export interface LogCursor {
+  files: Record<string, number>
+  since: string | null
+}
+
+/** Answer to an uploaded piece of a log file: where the next piece starts and how much was new. */
+export interface LogAppendResult {
+  file: string
+  end: number
+  stored: number
+}
 
 export interface StockaClientOptions {
   baseUrl: string
@@ -161,6 +174,25 @@ export class StockaClient {
     })
   }
 
+  /**
+   * `GET /organizations/{slug}/devices`: the players registered in an organization. 403 for an
+   * organization without the hardware feature (not admin-owned): the caller treats it as none.
+   */
+  async listDevices(orgSlug: string): Promise<StockaDevice[]> {
+    const body = await this.json<unknown>(`/organizations/${encodeURIComponent(orgSlug)}/devices`)
+    if (!Array.isArray(body)) return []
+    return body.filter(isRecord).map((d) => ({
+      id: Number(d.id ?? 0),
+      deviceId: typeof d.deviceId === 'string' ? d.deviceId : null,
+      name: String(d.name ?? ''),
+      localUrl: typeof d.localUrl === 'string' && d.localUrl ? d.localUrl : null,
+      pin: typeof d.pin === 'string' && d.pin ? d.pin : null,
+      hasPin: d.hasPin === true || (typeof d.pin === 'string' && d.pin !== ''),
+      online: d.online === true,
+      lastShowName: typeof d.lastShowName === 'string' ? d.lastShowName : null,
+    }))
+  }
+
   async listTimelines(orgSlug: string): Promise<Timeline[]> {
     const list = await this.json<unknown[]>(`/organizations/${encodeURIComponent(orgSlug)}/timelines`)
     return list.map((t) => {
@@ -223,6 +255,36 @@ export class StockaClient {
       options.onProgress?.(received, total)
     }
     return { bytes: received, fileName }
+  }
+
+  // ---------------------------------------------------------------- player log (the app carries it)
+
+  /**
+   * `GET /devices/{uuid}/logs/cursor`: how far each log file of a player is stored in Stocka. 404
+   * (`devices.not_found`) when no device the user controls has that uuid yet.
+   */
+  async logCursor(deviceUuid: string): Promise<LogCursor> {
+    const body = await this.json<unknown>(`/devices/${encodeURIComponent(deviceUuid)}/logs/cursor`)
+    const b = isRecord(body) ? body : {}
+    const files: Record<string, number> = {}
+    if (isRecord(b.files)) {
+      for (const [name, end] of Object.entries(b.files)) if (typeof end === 'number') files[name] = end
+    }
+    return { files, since: typeof b.since === 'string' ? b.since : null }
+  }
+
+  /**
+   * `POST /devices/{uuid}/logs?file=&from=`: the bytes `[from, from + length)` of a player's log
+   * file. Idempotent; a piece that would leave a gap is 409 `devices.log_offset_mismatch` with
+   * `params.expected`.
+   */
+  async uploadLog(deviceUuid: string, file: string, from: number, bytes: Uint8Array): Promise<LogAppendResult> {
+    const query = `file=${encodeURIComponent(file)}&from=${from}`
+    return this.json<LogAppendResult>(`/devices/${encodeURIComponent(deviceUuid)}/logs?${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      body: new Blob([bytes as BlobPart], { type: 'text/plain' }),
+    })
   }
 
   // ---------------------------------------------------------------- plumbing

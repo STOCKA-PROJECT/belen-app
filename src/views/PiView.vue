@@ -10,17 +10,45 @@ import SensorList from '../components/SensorList.vue'
 import StatusCard from '../components/StatusCard.vue'
 import UploadProgress from '../components/UploadProgress.vue'
 import { useI18n } from '../i18n'
+import { useAuthStore } from '../stores/auth'
+import { useDevicesStore } from '../stores/devices'
 import { useLibraryStore } from '../stores/library'
+import { useLogRelayStore } from '../stores/logRelay'
 import { usePiStore } from '../stores/pi'
-import type { LibraryEntry } from '../types'
+import type { LibraryEntry, SavedDevice } from '../types'
 import { hash8 } from '../util/bundleName'
-import { formatBytes } from '../util/format'
+import { formatBytes, formatDate } from '../util/format'
 
 const pi = usePiStore()
 const library = useLibraryStore()
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
+const auth = useAuthStore()
+const logRelay = useLogRelayStore()
+const devices = useDevicesStore()
+
+/** The Stocka device this connection corresponds to, to name it and to keep its PIN in step. */
+const currentDevice = computed(() => devices.find(pi.baseUrl, pi.info?.device.deviceId ?? null))
+
+async function connectTo(device: SavedDevice): Promise<boolean> {
+  const ok = await pi.connectTo(device)
+  if (ok) urlInput.value = pi.baseUrl
+  return ok
+}
+
+function isCurrent(device: SavedDevice): boolean {
+  return pi.connected && currentDevice.value?.id === device.id
+}
+
+/** What the phone holds of the players' log, and whether it can go to Stocka now. */
+const logRelayText = computed(() => {
+  if (logRelay.pendingBytes > 0) {
+    if (logRelay.waitingForUnknownDevice) return t('pi.logRelay.unknownDevice', { size: formatBytes(logRelay.pendingBytes) })
+    return t(logRelay.full ? 'pi.logRelay.full' : 'pi.logRelay.pending', { size: formatBytes(logRelay.pendingBytes) })
+  }
+  return logRelay.lastUploadAt ? t('pi.logRelay.upToDate', { when: formatDate(logRelay.lastUploadAt, locale.value) }) : t('pi.logRelay.nothing')
+})
 
 const urlInput = ref(pi.baseUrl)
 const showLogs = ref(false)
@@ -28,14 +56,17 @@ const libraryHashes = computed(() => new Set(library.entries.map((e) => e.hash))
 const piHashes = computed(() => new Set((pi.bundles?.shows ?? []).map((s) => s.hash)))
 const netEnabled = computed(() => pi.net && pi.net.enabled !== false)
 const pendingSend = ref<string | null>(null)
+/** Why the ports cannot be tested now (nothing to say when there is no show). */
+const testBlocked = computed(() => (pi.status?.rehearsal ? 'rehearsal' : pi.playing ? 'playing' : null))
 
-async function connect(url?: string): Promise<void> {
+async function connect(url?: string): Promise<boolean> {
   if (url) urlInput.value = url
   const ok = await pi.connect(urlInput.value)
   if (ok) urlInput.value = pi.baseUrl
+  return ok
 }
 
-function confirmThen(message: string, action: () => Promise<void>): void {
+function confirmThen(message: string, action: () => Promise<unknown>): void {
   if (window.confirm(message)) void action()
 }
 
@@ -77,8 +108,13 @@ onMounted(async () => {
     await router.replace({ path: '/pi' })
   }
   if (!pi.connected) {
-    const ok = await pi.connect()
-    if (!ok && pi.lastGoodUrl && pi.lastGoodUrl !== pi.baseUrl) await connect(pi.lastGoodUrl)
+    let ok = await pi.connect()
+    if (!ok && pi.lastGoodUrl && pi.lastGoodUrl !== pi.baseUrl) ok = await connect(pi.lastGoodUrl)
+    // Still nothing: the devices saved in Stocka, which carry their address and PIN.
+    for (const device of devices.connectable) {
+      if (ok) break
+      if (device.localUrl !== pi.baseUrl) ok = await connectTo(device)
+    }
   } else if (pendingSend.value) {
     const entry = library.findByFileName(pendingSend.value)
     pendingSend.value = null
@@ -102,6 +138,23 @@ onBeforeUnmount(() => {
         </span>
       </div>
       <form class="panel-body" @submit.prevent="connect()">
+        <template v-if="devices.connectable.length">
+          <span class="label">{{ t('pi.devices.title') }}</span>
+          <ul class="list device-list">
+            <li v-for="device in devices.connectable" :key="device.id" :class="{ 'is-active': isCurrent(device) }">
+              <div class="list-item-main">
+                <span class="name truncate">{{ device.name }}</span>
+                <span class="meta">{{ device.orgName }} · <span class="mono">{{ device.localUrl?.replace(/^https?:\/\//, '') }}</span><template v-if="!device.pin"> · {{ t('pi.devices.noPin') }}</template></span>
+              </div>
+              <div class="list-item-actions">
+                <span v-if="isCurrent(device)" class="badge badge-ok">{{ t('pi.connected') }}</span>
+                <button v-else type="button" class="btn btn-sm btn-primary" :disabled="pi.connecting" @click="connectTo(device)">{{ t('pi.connect') }}</button>
+              </div>
+            </li>
+          </ul>
+          <p class="small muted">{{ t('pi.devices.hint') }}</p>
+        </template>
+        <p v-else-if="auth.isAuthenticated" class="small muted">{{ t('pi.devices.none') }}</p>
         <label class="field-group">
           <span class="label">{{ t('pi.url') }}</span>
           <input v-model="urlInput" class="field mono" type="text" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" />
@@ -150,9 +203,20 @@ onBeforeUnmount(() => {
         :motors="pi.motors"
         :sensors="pi.status?.sensors"
         :busy="pi.busy"
+        :can-test="pi.canTest"
+        :test-blocked="testBlocked"
+        :test-targets="pi.testTargets"
+        :held-motor="pi.heldMotor"
+        :audio-files="pi.audioFiles"
         @toggle="pi.toggleOverride($event)"
         @clear="pi.clearOverrides()"
         @unlock="pi.unlockMotor($event)"
+        @test-on="(target, params) => pi.testOn(target, params)"
+        @test-live="(target, params) => pi.testLive(target, params)"
+        @test-off="pi.testOff($event)"
+        @test-off-all="pi.testOffAll()"
+        @motor-hold="(target, direction) => pi.motorHold(target, direction)"
+        @motor-release="pi.motorRelease()"
       />
 
       <SensorList :sensors="pi.sensors" />
@@ -237,6 +301,21 @@ onBeforeUnmount(() => {
             <pre v-if="pi.logs.length" class="logs">{{ pi.logs.join('\n') }}</pre>
             <p v-else class="small muted">{{ t('pi.logsEmpty') }}</p>
           </template>
+          <div class="row-between">
+            <div class="grow">
+              <span class="label">{{ t('pi.logRelay.title') }}</span>
+              <p class="small" :class="logRelay.full ? 'text-warn' : 'muted'">{{ logRelayText }}</p>
+            </div>
+            <button
+              v-if="logRelay.pendingBytes > 0 && auth.isAuthenticated"
+              type="button"
+              class="btn btn-sm"
+              :disabled="logRelay.flushing"
+              @click="logRelay.flush(auth.client)"
+            >
+              {{ t('pi.logRelay.uploadNow') }}
+            </button>
+          </div>
           <button type="button" class="btn btn-danger btn-block" :disabled="pi.busy" @click="confirmThen(t('pi.confirmReboot'), () => pi.reboot())">{{ t('pi.reboot') }}</button>
         </div>
       </section>
