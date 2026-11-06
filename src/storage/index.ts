@@ -43,4 +43,5 @@ export const KEYS = {
   piUploads: 'pi.uploads',
   logRelay: 'logs.relay',
   devices: 'devices.index',
+  headPorts: 'heads.ports',
 } as const

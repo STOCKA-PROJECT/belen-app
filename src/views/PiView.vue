@@ -12,10 +12,12 @@ import UploadProgress from '../components/UploadProgress.vue'
 import { useI18n } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { useDevicesStore } from '../stores/devices'
+import { useHeadPositionsStore } from '../stores/headPositions'
 import { useLibraryStore } from '../stores/library'
 import { useLogRelayStore } from '../stores/logRelay'
 import { usePiStore } from '../stores/pi'
-import type { LibraryEntry, SavedDevice } from '../types'
+import { useUiStore } from '../stores/ui'
+import type { HeadPosition, LibraryEntry, SavedDevice } from '../types'
 import { hash8 } from '../util/bundleName'
 import { formatBytes, formatDate } from '../util/format'
 
@@ -30,6 +32,42 @@ const devices = useDevicesStore()
 
 /** The Stocka device this connection corresponds to, to name it and to keep its PIN in step. */
 const currentDevice = computed(() => devices.find(pi.baseUrl, pi.info?.device.deviceId ?? null))
+
+// ---- moving heads: their Stocka ports (saved positions) and profiles, refreshed while there is Internet ----
+const headPositions = useHeadPositionsStore()
+const ui = useUiStore()
+const headPorts = computed(() => headPositions.headsOf(currentDevice.value?.orgSlug))
+const headProfiles = computed(() => {
+  const out: Record<string, NonNullable<ReturnType<typeof headPositions.profileOf>>> = {}
+  for (const [name, port] of Object.entries(headPorts.value)) {
+    const profile = headPositions.profileOf(port)
+    if (profile) out[name] = profile
+  }
+  return out
+})
+const canSavePositions = computed(() => currentDevice.value?.orgRole === 'OWNER' || currentDevice.value?.orgRole === 'MANAGER')
+
+watch(
+  () => [currentDevice.value?.orgSlug, ui.online, auth.isAuthenticated] as const,
+  ([orgSlug, online, authenticated]) => {
+    if (orgSlug && online && authenticated) void headPositions.refresh(auth.client, orgSlug)
+  },
+  { immediate: true },
+)
+
+/** Saves a position on the head's Stocka port, replacing one with the same name; every editor and device then sees it. */
+async function savePosition(portName: string, position: HeadPosition): Promise<void> {
+  const device = currentDevice.value
+  const port = headPorts.value[portName]
+  if (!device || !port) return
+  try {
+    const replaced = await headPositions.save(auth.client, device.orgSlug, port, position)
+    ui.toast(t(replaced ? 'pi.test.head.replaced' : 'pi.test.head.saved', { name: position.name, port: portName }))
+  } catch (err) {
+    if (auth.handleApiError(err)) return
+    ui.toast(t('pi.test.head.saveFailed', { reason: err instanceof Error ? err.message : String(err) }), true)
+  }
+}
 
 async function connectTo(device: SavedDevice): Promise<boolean> {
   const ok = await pi.connectTo(device)
@@ -208,6 +246,11 @@ onBeforeUnmount(() => {
         :test-targets="pi.testTargets"
         :held-motor="pi.heldMotor"
         :audio-files="pi.audioFiles"
+        :head-ports="headPorts"
+        :head-profiles="headProfiles"
+        :can-save-positions="canSavePositions"
+        :online="ui.online"
+        @save-position="(port, position) => savePosition(port, position)"
         @toggle="pi.toggleOverride($event)"
         @clear="pi.clearOverrides()"
         @unlock="pi.unlockMotor($event)"

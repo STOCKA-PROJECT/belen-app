@@ -247,6 +247,43 @@ describe('StockaClient player log', () => {
   })
 })
 
+describe('StockaClient ports and head profiles', () => {
+  const client = (fetchImpl: typeof fetch) => new StockaClient({ baseUrl: 'https://stocka.test', getToken: () => 'jwt', fetchImpl })
+
+  it('lists the ports with their config and tolerates junk', async () => {
+    const { calls, fetchImpl } = recording(() => json(200, [
+      { id: 7, name: 'Cap1', kind: 'moving_head', config: { profile: 'varytec-hero-wash-712z', address: 1, positions: [{ name: 'Portal', pan: 1 }] } },
+      { id: 8, name: 'Focos', kind: 'relay' },
+      'nope',
+    ]))
+    const ports = await client(fetchImpl).listPorts('parròquia')
+    expect(ports).toEqual([
+      { id: 7, name: 'Cap1', kind: 'moving_head', config: { profile: 'varytec-hero-wash-712z', address: 1, positions: [{ name: 'Portal', pan: 1 }] } },
+      { id: 8, name: 'Focos', kind: 'relay', config: {} },
+    ])
+    expect(calls[0]!.url).toBe('https://stocka.test/organizations/parr%C3%B2quia/ports')
+    expect(await client(recording(() => json(200, {})).fetchImpl).listPorts('x')).toEqual([])
+  })
+
+  it('patches the config of a port and returns the updated port', async () => {
+    const { calls, fetchImpl } = recording(() => json(200, { id: 7, name: 'Cap1', kind: 'moving_head', config: { address: 1, positions: [] } }))
+    const port = await client(fetchImpl).updatePortConfig('org', 7, { address: 1, positions: [] })
+    expect(port).toEqual({ id: 7, name: 'Cap1', kind: 'moving_head', config: { address: 1, positions: [] } })
+    expect(calls[0]!.url).toBe('https://stocka.test/organizations/org/ports/7')
+    expect(calls[0]!.init?.method).toBe('PATCH')
+    expect(JSON.parse(String(calls[0]!.init?.body))).toEqual({ config: { address: 1, positions: [] } })
+  })
+
+  it('reads the moving head profiles of the catalog with defaults for missing ranges', async () => {
+    const { fetchImpl } = recording(() => json(200, { profiles: { moving_head: { 'varytec-hero-wash-712z': { pan: { max: 540 }, tilt: { max: 190 }, zoom: { min: 6, max: 36 } }, odd: { pan: 'x' } } } }))
+    expect(await client(fetchImpl).headProfiles()).toEqual({
+      'varytec-hero-wash-712z': { pan: { max: 540 }, tilt: { max: 190 }, zoom: { min: 6, max: 36 } },
+      odd: { pan: { max: 540 }, tilt: { max: 270 }, zoom: { min: 0, max: 100 } },
+    })
+    expect(await client(recording(() => json(200, {})).fetchImpl).headProfiles()).toEqual({})
+  })
+})
+
 describe('StockaClient.listDevices', () => {
   const client = (fetchImpl: typeof fetch) => new StockaClient({ baseUrl: 'https://stocka.test', getToken: () => 'jwt', fetchImpl })
 

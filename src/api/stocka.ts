@@ -1,5 +1,5 @@
 import type { ByteSink } from '../storage/bundleFiles'
-import type { LoginResult, Organization, ShowIssue, ShowMeta, StockaDevice, StockaSession, Timeline } from '../types'
+import type { HeadProfile, LoginResult, Organization, ShowIssue, ShowMeta, StockaDevice, StockaPort, StockaSession, Timeline } from '../types'
 import { parseContentDispositionFilename } from '../util/bundleName'
 import { joinUrl } from '../util/url'
 import { isRecord, NetworkError, readJsonBody, safeFetch } from './errors'
@@ -172,6 +172,47 @@ export class StockaClient {
         currentUserRole: typeof r.currentUserRole === 'string' ? (r.currentUserRole as Organization['currentUserRole']) : null,
       }
     })
+  }
+
+  /**
+   * `GET /organizations/{slug}/ports`: the hardware ports of an organization (name, kind and config,
+   * which for a `moving_head` holds its saved positions). 403 for an organization without the feature.
+   */
+  async listPorts(orgSlug: string): Promise<StockaPort[]> {
+    const body = await this.json<unknown>(`/organizations/${encodeURIComponent(orgSlug)}/ports`)
+    if (!Array.isArray(body)) return []
+    return body.filter(isRecord).map((p) => ({
+      id: Number(p.id ?? 0),
+      name: String(p.name ?? ''),
+      kind: String(p.kind ?? ''),
+      config: isRecord(p.config) ? (p.config as Record<string, unknown>) : {},
+    }))
+  }
+
+  /** `PATCH /organizations/{slug}/ports/{id}` with a new `config` (it replaces the whole config of the port). */
+  async updatePortConfig(orgSlug: string, portId: number, config: Record<string, unknown>): Promise<StockaPort> {
+    const p = await this.json<Record<string, unknown>>(`/organizations/${encodeURIComponent(orgSlug)}/ports/${portId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ config }),
+    })
+    return { id: Number(p.id ?? portId), name: String(p.name ?? ''), kind: String(p.kind ?? ''), config: isRecord(p.config) ? (p.config as Record<string, unknown>) : {} }
+  }
+
+  /** `GET /contract/catalog`: the moving head profiles (`profiles.moving_head`) by id, for the slider ranges. */
+  async headProfiles(): Promise<Record<string, HeadProfile>> {
+    const body = await this.json<Record<string, unknown>>('/contract/catalog')
+    const profiles = isRecord(body.profiles) && isRecord(body.profiles.moving_head) ? body.profiles.moving_head : {}
+    const out: Record<string, HeadProfile> = {}
+    for (const [id, raw] of Object.entries(profiles)) {
+      if (!isRecord(raw)) continue
+      const num = (group: unknown, key: string, fallback: number) => (isRecord(group) && typeof group[key] === 'number' ? (group[key] as number) : fallback)
+      out[id] = {
+        pan: { max: num(raw.pan, 'max', 540) },
+        tilt: { max: num(raw.tilt, 'max', 270) },
+        zoom: { min: num(raw.zoom, 'min', 0), max: num(raw.zoom, 'max', 100) },
+      }
+    }
+    return out
   }
 
   /**

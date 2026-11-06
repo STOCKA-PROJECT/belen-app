@@ -41,6 +41,38 @@ export interface StockaDevice {
 export interface SavedDevice extends StockaDevice {
   orgSlug: string
   orgName: string
+  /** The user's role in that organization (absent in lists saved by older versions of the app). */
+  orgRole?: OrganizationRole | null
+}
+
+/**
+ * A named position of a moving head (`config.positions` of a `moving_head` port of Stocka): the
+ * values a `set` clip applies when it names it, in the units of `set` (degrees, percent, RGB
+ * 0–255). Every value is optional.
+ */
+export interface HeadPosition {
+  name: string
+  pan?: number
+  tilt?: number
+  zoom?: number
+  intensity?: number
+  color?: [number, number, number]
+  white?: number
+}
+
+/** A hardware port of Stocka (`GET /organizations/{slug}/ports`), as much as the app needs: heads and their positions. */
+export interface StockaPort {
+  id: number
+  name: string
+  kind: string
+  config: Record<string, unknown>
+}
+
+/** Ranges of a DMX fixture (`profiles.moving_head.<id>` of the output catalog), for the sliders. */
+export interface HeadProfile {
+  pan: { max: number }
+  tilt: { max: number }
+  zoom: { min: number; max: number }
 }
 
 export interface StockaUser {

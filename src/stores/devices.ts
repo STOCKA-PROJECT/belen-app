@@ -64,7 +64,7 @@ export const useDevicesStore = defineStore('devices', () => {
       for (const org of orgs) {
         try {
           const list = await stocka.listDevices(org.slug)
-          next.push(...list.map((d) => ({ ...d, orgSlug: org.slug, orgName: org.name })))
+          next.push(...list.map((d) => ({ ...d, orgSlug: org.slug, orgName: org.name, orgRole: org.currentUserRole })))
         } catch (err) {
           if (err instanceof StockaApiError && err.status === 403) continue // no hardware feature
           throw err

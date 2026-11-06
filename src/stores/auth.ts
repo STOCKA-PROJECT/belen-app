@@ -9,6 +9,7 @@ import { readJson, writeJson } from '../storage/kv'
 import type { StockaSession, StockaUser } from '../types'
 import { normalizeBaseUrl } from '../util/url'
 import { useDevicesStore } from './devices'
+import { useHeadPositionsStore } from './headPositions'
 
 interface SavedSession {
   baseUrl: string
@@ -135,6 +136,7 @@ export const useAuthStore = defineStore('auth', () => {
     sessionExpired.value = false
     await persist()
     await useDevicesStore().clear()
+    await useHeadPositionsStore().clear()
   }
 
   function clearSession(): void {
