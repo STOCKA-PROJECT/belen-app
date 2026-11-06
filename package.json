@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "typecheck": "vue-tsc -b",
     "cap:sync": "cap sync android",
-    "cap:open": "cap open android"
+    "cap:open": "cap open android",
+    "apk": "bash scripts/apk.sh"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.3",

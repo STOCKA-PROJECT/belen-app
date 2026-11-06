@@ -32,6 +32,25 @@ cd android && ./gradlew assembleDebug     # android/app/build/outputs/apk/debug/
 
 Tras cada cambio del código web: `pnpm build && npx cap sync android` y volver a compilar.
 
+### APK desde WSL, sin Android Studio
+
+`pnpm apk` (`scripts/apk.sh`) hace los tres pasos seguidos y deja `android/app/build/outputs/apk/debug/app-debug.apk`
+(`APK_OUT=/ruta.apk pnpm apk` lo copia además ahí, por ejemplo a `/mnt/c/Users/<usuario>/Downloads/`). Solo necesita, una
+vez, dos cosas en la carpeta de usuario (sin `sudo`; el portátil de Joan las tiene desde el 28-10-2026):
+
+- **JDK 21** en `~/.jdks/jdk-21…` (Temurin, <https://adoptium.net/temurin/releases/?version=21>, `tar -xzf … -C ~/.jdks`):
+  Gradle 8.14 no arranca con el JDK 25 del sistema. O `JAVA_HOME` apuntando a otro JDK 21.
+- **SDK de Android** en `~/android-sdk` (o `ANDROID_HOME`): descomprimir las *command-line tools* de
+  <https://developer.android.com/studio#command-line-tools-only> en `~/android-sdk/cmdline-tools/latest/` y luego
+  `yes | sdkmanager --licenses && sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"`
+  (con `JAVA_HOME` del punto anterior). Gradle instala solo lo que le falte después (build-tools 35, por ejemplo).
+
+El APK de depuración va firmado con la clave de depuración de la máquina que lo compila (`~/.android/debug.keystore`):
+un móvil con la app instalada desde otra máquina (Android Studio en Windows, por ejemplo) no la actualiza por encima;
+hay que desinstalarla primero. Instalar: copiar el `.apk` al móvil y abrirlo (permitir «orígenes desconocidos»), o con
+el cable y la depuración USB activada, `adb install -r app-debug.apk` (el `adb` de Windows está en
+`%LOCALAPPDATA%\Android\Sdk\platform-tools`; WSL no ve el USB).
+
 ### Desarrollo en el navegador
 
 Un navegador de escritorio no puede llamar ni a la Raspberry (no envía cabeceras CORS) ni al backend
